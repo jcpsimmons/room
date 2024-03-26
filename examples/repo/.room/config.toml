@@ -1,0 +1,24 @@
+[run]
+default_iterations = 100
+max_failures = 3
+until_done = false
+allow_dirty = false
+commit = true
+commit_prefix = "room:"
+
+[codex]
+binary = "codex"
+model = ""
+sandbox = "danger-full-access"
+approval = "never"
+timeout_seconds = 1800
+
+[prompt]
+instruction_file = ".room/instruction.txt"
+max_recent_summaries = 10
+max_seen_instructions = 50
+force_pivot_on_duplicate = true
+
+[output]
+verbose = false
+json = false

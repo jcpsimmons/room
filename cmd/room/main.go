@@ -1,0 +1,621 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/app"
+	"github.com/jcpsimmons/room/internal/git"
+	"github.com/jcpsimmons/room/internal/ui"
+	"github.com/jcpsimmons/room/internal/version"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	info := version.Current()
+	svc := app.NewService(app.Dependencies{
+		Git:     git.NewClient(),
+		Version: info,
+	})
+
+	root := newRootCommand(ctx, svc, info)
+	if err := root.ExecuteContext(ctx); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "room",
+		Short:         "ROOM is a repo-improvement orchestrator for Codex and Claude Code.",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+
+	root.AddCommand(newInitCommand(ctx, svc))
+	root.AddCommand(newRunCommand(ctx, svc))
+	root.AddCommand(newStatusCommand(ctx, svc))
+	root.AddCommand(newDoctorCommand(ctx, svc))
+	root.AddCommand(newInspectCommand(ctx, svc))
+	root.AddCommand(newVersionCommand(info))
+
+	return root
+}
+
+func newInitCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var initialPrompt string
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Initialize ROOM state in the current repository",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			resolvedPrompt, err := resolveInitPrompt(initialPrompt, os.Stdin)
+			if err != nil {
+				return err
+			}
+			report, err := svc.Init(ctx, app.InitOptions{
+				WorkingDir:    mustWD(),
+				InitialPrompt: resolvedPrompt,
+			})
+			if err != nil {
+				return err
+			}
+			return renderInit(report)
+		},
+	}
+	cmd.Flags().StringVar(&initialPrompt, "prompt", "", "seed the initial instruction; use '-' to read from stdin")
+	return cmd
+}
+
+func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var opts app.RunOptions
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run the improvement loop",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			opts.WorkingDir = mustWD()
+			opts.UntilDoneSet = cmd.Flags().Changed("until-done")
+			opts.AllowDirtySet = cmd.Flags().Changed("allow-dirty")
+			opts.VerboseSet = cmd.Flags().Changed("verbose")
+			opts.JSONSet = cmd.Flags().Changed("json")
+			if !opts.JSON && canStyleOutput() {
+				if shouldUseRunUI() {
+					return runWithUI(ctx, svc, opts)
+				}
+				return runWithLiveProgress(ctx, svc, opts)
+			}
+			if !opts.JSON {
+				report, err := svc.Run(ctx, opts)
+				if err != nil {
+					return err
+				}
+				return renderLines(report.Lines)
+			}
+			report, err := svc.Run(ctx, opts)
+			return printJSON(report, err)
+		},
+	}
+	cmd.Flags().IntVar(&opts.Iterations, "iterations", 0, "maximum iterations to run")
+	cmd.Flags().BoolVar(&opts.UntilDone, "until-done", false, "run until the selected agent reports done")
+	cmd.Flags().IntVar(&opts.MaxFailures, "max-failures", 0, "maximum failures before stopping")
+	cmd.Flags().BoolVar(&opts.NoCommit, "no-commit", false, "do not create git commits")
+	cmd.Flags().BoolVar(&opts.AllowDirty, "allow-dirty", false, "allow starting from a dirty repository")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "build prompts and artifacts without executing the agent")
+	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "print more per-iteration detail")
+	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit machine-readable JSON")
+	cmd.Flags().StringVar(&opts.InstructionFile, "instruction-file", "", "override the instruction file path")
+	cmd.Flags().StringVar(&opts.ConfigPath, "config", "", "override the config path")
+	cmd.Flags().StringVar(&opts.CommitPrefix, "commit-prefix", "", "override the configured commit prefix")
+	return cmd
+}
+
+func newStatusCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show current ROOM state",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Status(ctx, app.StatusOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+			})
+			if asJSON {
+				return printJSON(report, err)
+			}
+			if err != nil {
+				return err
+			}
+			return renderStatus(report)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	return cmd
+}
+
+func newDoctorCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Run environment and repository checks",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Doctor(ctx, app.DoctorOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+			})
+			if asJSON {
+				return printJSON(report, err)
+			}
+			if err != nil {
+				return err
+			}
+			return renderDoctor(report)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	return cmd
+}
+
+func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var instructionFile string
+	cmd := &cobra.Command{
+		Use:   "inspect",
+		Short: "Show the prompt ROOM would send to the selected agent",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Inspect(ctx, app.InspectOptions{
+				WorkingDir:      mustWD(),
+				ConfigPath:      configPath,
+				InstructionFile: instructionFile,
+			})
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(os.Stdout, report.Prompt)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().StringVar(&instructionFile, "instruction-file", "", "override the instruction file path")
+	return cmd
+}
+
+func newVersionCommand(info version.Info) *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Show build version information",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintln(os.Stdout, info.String())
+			return err
+		},
+	}
+}
+
+func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
+	total := opts.Iterations
+	if total <= 0 {
+		total = 1
+	}
+
+	model := ui.NewRunModel(total, ui.WithAudio())
+	program := tea.NewProgram(
+		model,
+		tea.WithAltScreen(),
+		tea.WithContext(ctx),
+		tea.WithInput(nil),
+		tea.WithoutSignalHandler(),
+	)
+
+	type runResult struct {
+		report app.RunReport
+		err    error
+	}
+
+	resultCh := make(chan runResult, 1)
+	opts.Progress = func(event app.RunProgressEvent) {
+		program.Send(ui.ProgressMsg{Event: toUIProgressEvent(event)})
+	}
+
+	go func() {
+		report, err := svc.Run(ctx, opts)
+		resultCh <- runResult{report: report, err: err}
+		time.Sleep(120 * time.Millisecond)
+		program.Quit()
+	}()
+
+	_, uiErr := program.Run()
+	model.Shutdown()
+	result := <-resultCh
+
+	renderErr := renderRun(result.report)
+	if uiErr != nil && !errors.Is(uiErr, tea.ErrProgramKilled) {
+		return errors.Join(result.err, renderErr, uiErr)
+	}
+	return errors.Join(result.err, renderErr)
+}
+
+func runWithLiveProgress(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
+	opts.Progress = func(event app.RunProgressEvent) {
+		for _, line := range formatRunProgress(event) {
+			_, _ = fmt.Fprintln(os.Stdout, line)
+		}
+	}
+
+	report, err := svc.Run(ctx, opts)
+	renderErr := renderRun(report)
+	return errors.Join(err, renderErr)
+}
+
+func formatRunProgress(event app.RunProgressEvent) []string {
+	switch event.Phase {
+	case app.RunProgressPhaseRunStart:
+		return []string{
+			fmt.Sprintf("ROOM run in %s", event.RepoRoot),
+			fmt.Sprintf("Provider: %s", agent.DisplayName(event.Provider)),
+			fmt.Sprintf("Iterations requested: %d", event.RequestedIterations),
+			fmt.Sprintf("Commit mode: %t", event.CommitEnabled),
+		}
+	case app.RunProgressPhaseIterationStart:
+		return []string{fmt.Sprintf("Starting iteration %d...", event.Iteration)}
+	case app.RunProgressPhaseAgentExecutionStart:
+		return []string{fmt.Sprintf("Executing iteration %d with %s...", event.Iteration, agent.DisplayName(event.Provider))}
+	case app.RunProgressPhaseIterationSuccess:
+		if event.DryRun {
+			return []string{fmt.Sprintf("Dry run prepared prompt for iteration %d at %s", event.Iteration, event.PromptPath)}
+		}
+		detail := strings.TrimSpace(event.Summary)
+		if detail == "" {
+			detail = "iteration completed cleanly"
+		}
+		return []string{fmt.Sprintf("Iteration %d [%s]: %s", event.Iteration, event.Status, detail)}
+	case app.RunProgressPhaseIterationFailure:
+		return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, errorText(event.Err, "agent execution failed"))}
+	case app.RunProgressPhaseRunFinish:
+		if event.Err != nil {
+			return []string{fmt.Sprintf("Run halted: %s", event.Err.Error())}
+		}
+		if event.Status == "done" {
+			return []string{"Agent reported done. Stopping."}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func shouldUseRunUI() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ROOM_TUI"))) {
+	case "0", "false", "no", "off":
+		return false
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return true
+	}
+}
+
+func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
+	total := event.RequestedIterations
+	if total <= 0 {
+		total = max(event.CompletedIterations+1, 1)
+	}
+
+	progressValue := 0.0
+	if total > 0 {
+		progressValue = float64(event.CompletedIterations) / float64(total)
+	}
+
+	out := ui.ProgressEvent{
+		Kind:         ui.ProgressStep,
+		Iteration:    event.Iteration,
+		Total:        total,
+		Completed:    event.CompletedIterations,
+		Failures:     event.Failures,
+		Percent:      progressValue,
+		HasIteration: event.Iteration > 0,
+		HasTotal:     total > 0,
+		HasCompleted: true,
+		HasFailures:  true,
+		HasPercent:   total > 0,
+		When:         progressWhen(event),
+
+		Provider:      event.Provider,
+		Model:         event.Model,
+		RepoRoot:      event.RepoRoot,
+		CommitEnabled: event.CommitEnabled,
+		DryRun:        event.DryRun,
+	}
+
+	switch event.Phase {
+	case app.RunProgressPhaseRunStart:
+		out.Kind = ui.ProgressStart
+		out.Title = "voltage applied"
+		out.Detail = fmt.Sprintf("patched %s through %s", event.RepoRoot, strings.ToUpper(event.Provider))
+	case app.RunProgressPhaseIterationStart:
+		out.Kind = ui.ProgressStep
+		out.Title = fmt.Sprintf("step %d gate open", event.Iteration)
+		out.Detail = event.RunDir
+	case app.RunProgressPhaseAgentExecutionStart:
+		out.Kind = ui.ProgressStep
+		out.Title = fmt.Sprintf("%s oscillating", strings.ToUpper(event.Provider))
+		out.Detail = fmt.Sprintf("step %d signal routed", event.Iteration)
+	case app.RunProgressPhaseIterationSuccess:
+		out.Kind = ui.ProgressComplete
+		out.Title = fmt.Sprintf("step %d output captured", event.Iteration)
+		if event.Summary != "" {
+			out.Detail = event.Summary
+		} else if event.DryRun {
+			out.Detail = "monitor mode, no signal committed to tape"
+		} else {
+			out.Detail = "waveform recorded"
+		}
+		switch event.Status {
+		case "pivot":
+			out.Kind = ui.ProgressPivot
+		case "done":
+			out.Kind = ui.ProgressDone
+			out.Percent = 1
+			out.HasPercent = true
+		}
+	case app.RunProgressPhaseIterationFailure:
+		out.Kind = ui.ProgressFailure
+		out.Title = fmt.Sprintf("step %d overloaded", event.Iteration)
+		out.Detail = errorText(event.Err, "signal clipped")
+	case app.RunProgressPhaseRunFinish:
+		switch {
+		case event.Err != nil:
+			out.Kind = ui.ProgressFailure
+			out.Title = "sequence interrupted"
+			out.Detail = event.Err.Error()
+		case event.Status == "dry_run":
+			out.Kind = ui.ProgressComplete
+			out.Title = "monitor pass complete"
+			out.Detail = "all signals observed, nothing committed to tape"
+			out.Percent = 1
+			out.HasPercent = true
+		case event.Status == "done":
+			out.Kind = ui.ProgressDone
+			out.Title = "sequence complete"
+			out.Detail = "all voices report silence"
+			out.Percent = 1
+			out.HasPercent = true
+		default:
+			out.Kind = ui.ProgressComplete
+			out.Title = "sequence ended"
+			out.Detail = fmt.Sprintf("%d steps through the filter", event.CompletedIterations)
+			if total > 0 && event.CompletedIterations >= total {
+				out.Percent = 1
+				out.HasPercent = true
+			}
+		}
+	}
+
+	return out
+}
+
+func progressWhen(event app.RunProgressEvent) time.Time {
+	switch {
+	case !event.FinishedAt.IsZero():
+		return event.FinishedAt
+	case !event.StartedAt.IsZero():
+		return event.StartedAt
+	default:
+		return time.Now()
+	}
+}
+
+func renderInit(report app.InitReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	summary := ui.InitSummary{
+		RepoRoot:  report.RepoRoot,
+		RoomDir:   report.RoomDir,
+		NextSteps: []string{"room doctor", "room inspect", "room run --iterations 5"},
+	}
+	for _, line := range report.Lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "",
+			strings.HasPrefix(trimmed, "Initialized ROOM in "),
+			strings.HasPrefix(trimmed, "State directory:"),
+			trimmed == "Next steps:",
+			trimmed == "room doctor",
+			trimmed == "room inspect",
+			trimmed == "room run --iterations 5":
+			continue
+		}
+		if strings.HasPrefix(trimmed, "ROOM ignores ") || strings.HasPrefix(trimmed, "Recommendation:") {
+			summary.MissingIgnore = true
+			if summary.IgnoreAdvisory != "" {
+				summary.IgnoreAdvisory += "\n"
+			}
+			summary.IgnoreAdvisory += trimmed
+			continue
+		}
+		summary.Notes = append(summary.Notes, trimmed)
+	}
+	return renderBlock(ui.RenderInit(summary))
+}
+
+func resolveInitPrompt(raw string, stdin io.Reader) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+
+	prompt := raw
+	if raw == "-" {
+		if stdin == nil {
+			return "", errors.New("stdin is not available")
+		}
+		data, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("read initial prompt from stdin: %w", err)
+		}
+		prompt = string(data)
+	}
+
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", errors.New("initial prompt cannot be empty")
+	}
+	return prompt, nil
+}
+
+func renderStatus(report app.StatusReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	recentSummaries := make([]string, 0, len(report.RecentSummaries))
+	for _, summary := range report.RecentSummaries {
+		recentSummaries = append(recentSummaries, fmt.Sprintf("#%d [%s] %s", summary.Iteration, summary.Status, summary.Summary))
+	}
+
+	return renderBlock(ui.RenderStatus(ui.StatusSummary{
+		RepoRoot:           report.RepoRoot,
+		Provider:           report.Provider,
+		Iteration:          report.State.CurrentIteration,
+		LastRun:            formatStatusTime(report.State.LastRunAt),
+		LastStatus:         report.State.LastStatus,
+		Dirty:              report.Dirty,
+		CurrentInstruction: report.CurrentInstruction,
+		RecentCommits:      report.RecentCommits,
+		RecentSummaries:    recentSummaries,
+	}))
+}
+
+func renderDoctor(report app.DoctorReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	checks := make([]ui.Check, 0, len(report.Checks))
+	var notes []string
+	for _, check := range report.Checks {
+		checks = append(checks, ui.Check{
+			Name:    check.Name,
+			OK:      check.OK,
+			Message: check.Message,
+		})
+		if check.Name == "expectation" || (check.Name == "state" && strings.Contains(check.Message, "not initialized")) {
+			notes = append(notes, check.Message)
+		}
+	}
+
+	return renderBlock(ui.RenderDoctor(ui.DoctorSummary{
+		RepoRoot: report.RepoRoot,
+		Checks:   checks,
+		Notes:    notes,
+	}))
+}
+
+func renderRun(report app.RunReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	return renderBlock(ui.RenderRun(ui.RunSummary{
+		RepoRoot:            report.RepoRoot,
+		Provider:            report.Provider,
+		RequestedIterations: report.RequestedIterations,
+		CompletedIterations: report.CompletedIterations,
+		Failures:            report.Failures,
+		LastStatus:          report.LastStatus,
+		LastRunDir:          report.LastRunDir,
+		Timeline:            report.Lines,
+	}))
+}
+
+func renderBlock(block string) error {
+	_, err := fmt.Fprintln(os.Stdout, block)
+	return err
+}
+
+func renderLines(lines []string) error {
+	for _, line := range lines {
+		if _, err := fmt.Fprintln(os.Stdout, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printJSON(v any, err error) error {
+	payload := map[string]any{"ok": err == nil}
+	if v != nil {
+		payload["result"] = v
+	}
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	data, marshalErr := json.MarshalIndent(payload, "", "  ")
+	if marshalErr != nil {
+		return errors.Join(err, marshalErr)
+	}
+	_, writeErr := fmt.Fprintln(os.Stdout, string(data))
+	return errors.Join(err, writeErr)
+}
+
+func mustWD() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	return filepath.Clean(wd)
+}
+
+func canStyleOutput() bool {
+	if os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func formatStatusTime(value any) string {
+	switch t := value.(type) {
+	case interface {
+		IsZero() bool
+		Format(string) string
+	}:
+		if t.IsZero() {
+			return "never"
+		}
+		return t.Format(time.RFC3339)
+	default:
+		return "unknown"
+	}
+}
+
+func errorText(err error, fallback string) string {
+	if err == nil {
+		return fallback
+	}
+	return err.Error()
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

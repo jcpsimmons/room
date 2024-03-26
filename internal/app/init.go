@@ -1,0 +1,119 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/config"
+	"github.com/jcpsimmons/room/internal/fsutil"
+	"github.com/jcpsimmons/room/internal/prompt"
+	"github.com/jcpsimmons/room/internal/state"
+)
+
+type InitOptions struct {
+	WorkingDir    string
+	InitialPrompt string
+}
+
+type InitReport struct {
+	RepoRoot string   `json:"repo_root"`
+	RoomDir  string   `json:"room_dir"`
+	Lines    []string `json:"lines"`
+}
+
+func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error) {
+	repoRoot, err := s.requireRepo(ctx, opts.WorkingDir)
+	if err != nil {
+		return InitReport{}, err
+	}
+
+	cfg := config.Default()
+	paths := config.ResolvePaths(repoRoot, filepath.Join(repoRoot, config.DefaultConfigRelPath), cfg)
+	if err := fsutil.EnsureDir(paths.RoomDir); err != nil {
+		return InitReport{}, err
+	}
+	if err := fsutil.EnsureDir(paths.RunsDir); err != nil {
+		return InitReport{}, err
+	}
+
+	if !fsutil.FileExists(paths.ConfigPath) {
+		if err := config.Save(paths.ConfigPath, cfg); err != nil {
+			return InitReport{}, err
+		}
+	}
+	seedInstruction := prompt.DefaultSeedInstruction()
+	customPrompt := strings.TrimSpace(opts.InitialPrompt)
+	if customPrompt != "" {
+		seedInstruction = customPrompt
+	}
+
+	wroteInstruction := false
+	if !fsutil.FileExists(paths.InstructionPath) {
+		if err := fsutil.AtomicWriteFile(paths.InstructionPath, []byte(seedInstruction+"\n"), 0o644); err != nil {
+			return InitReport{}, err
+		}
+		wroteInstruction = true
+	}
+	if !fsutil.FileExists(paths.SchemaPath) {
+		if err := agent.WriteSchema(paths.SchemaPath); err != nil {
+			return InitReport{}, err
+		}
+	}
+	if !fsutil.FileExists(paths.StatePath) {
+		currentInstruction, err := readTrimmed(paths.InstructionPath)
+		if err != nil {
+			return InitReport{}, err
+		}
+		snapshot := state.New(s.version.Version, s.now())
+		snapshot.CurrentInstructionHash = state.InstructionHash(currentInstruction)
+		if err := s.saveState(paths.StatePath, snapshot); err != nil {
+			return InitReport{}, err
+		}
+	}
+	for _, path := range []string{paths.SummariesPath, paths.SeenInstructionsPath} {
+		if !fsutil.FileExists(path) {
+			if err := fsutil.AtomicWriteFile(path, nil, 0o644); err != nil {
+				return InitReport{}, err
+			}
+		}
+	}
+
+	lines := []string{
+		fmt.Sprintf("Initialized ROOM in %s", repoRoot),
+		fmt.Sprintf("State directory: %s", paths.RoomDir),
+		"Next steps:",
+		"  room doctor",
+		"  room inspect",
+		"  room run --iterations 5",
+	}
+	if customPrompt != "" {
+		if wroteInstruction {
+			lines = append(lines, "Seeded instruction.txt from the provided initial prompt.")
+		} else {
+			lines = append(lines, "Instruction file already exists; custom prompt was not applied.")
+		}
+	}
+	if missingIgnore(repoRoot) {
+		lines = append(lines, "ROOM ignores `.room/` in its own dirty checks, diffs, and commits.")
+		lines = append(lines, "Recommendation: add `.room/` to `.git/info/exclude` or `.gitignore` if you also want plain `git status` to stay clean.")
+	}
+
+	return InitReport{
+		RepoRoot: repoRoot,
+		RoomDir:  paths.RoomDir,
+		Lines:    lines,
+	}, nil
+}
+
+func missingIgnore(repoRoot string) bool {
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".gitignore"))
+	if err != nil {
+		return true
+	}
+	text := string(data)
+	return !strings.Contains(text, ".room/")
+}
