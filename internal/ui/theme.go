@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -56,9 +58,9 @@ func subtitleStyle() lipgloss.Style {
 		Foreground(dimColor)
 }
 
-func accentBadge(fg, bg lipgloss.Color) lipgloss.Style {
+func accentBadge(bg lipgloss.Color) lipgloss.Style {
 	return lipgloss.NewStyle().
-		Foreground(fg).
+		Foreground(badgeForeground(bg)).
 		Background(bg).
 		Bold(true).
 		Padding(0, 1)
@@ -104,7 +106,7 @@ func bulletLines(items []string, color lipgloss.Color) string {
 func kvLine(label, value string, accent lipgloss.Color) string {
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		accentBadge(textColor, accent).Render(" "+label+" "),
+		accentBadge(accent).Render(" "+label+" "),
 		" ",
 		subtitleStyle().Render(value),
 	)
@@ -113,7 +115,7 @@ func kvLine(label, value string, accent lipgloss.Color) string {
 func framed(title, body string, accent lipgloss.Color) string {
 	head := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		accentBadge(textColor, accent).Render(" "+title+" "),
+		accentBadge(accent).Render(" "+title+" "),
 	)
 	return neonPanel(accent).Render(lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -126,16 +128,82 @@ func framed(title, body string, accent lipgloss.Color) string {
 func statusBadge(kind string) string {
 	switch kind {
 	case "done", "success":
-		return accentBadge(bgColor, accentLime).Render(" DONE ")
+		return accentBadge(accentLime).Render(" DONE ")
 	case "dry_run":
-		return accentBadge(bgColor, accentGold).Render(" DRY ")
+		return accentBadge(accentGold).Render(" DRY ")
 	case "pivot":
-		return accentBadge(bgColor, accentGold).Render(" PIVOT ")
+		return accentBadge(accentGold).Render(" PIVOT ")
 	case "failed", "failure":
-		return accentBadge(bgColor, accentRed).Render(" FAIL ")
+		return accentBadge(accentRed).Render(" FAIL ")
 	case "running":
-		return accentBadge(bgColor, accentCyan).Render(" RUN ")
+		return accentBadge(accentCyan).Render(" RUN ")
 	default:
-		return accentBadge(bgColor, accentViolet).Render(" " + strings.ToUpper(kind) + " ")
+		return accentBadge(accentViolet).Render(" " + strings.ToUpper(kind) + " ")
 	}
+}
+
+func badgeForeground(bg lipgloss.Color) lipgloss.Color {
+	if contrastRatio(textColor, bg) >= contrastRatio(bgColor, bg) {
+		return textColor
+	}
+	return bgColor
+}
+
+func contrastRatio(a, b lipgloss.Color) float64 {
+	ar, ag, ab, ok := parseHexColor(a)
+	if !ok {
+		return 1
+	}
+	br, bg, bb, ok := parseHexColor(b)
+	if !ok {
+		return 1
+	}
+
+	al := relativeLuminance(ar, ag, ab)
+	bl := relativeLuminance(br, bg, bb)
+	if al < bl {
+		al, bl = bl, al
+	}
+	return (al + 0.05) / (bl + 0.05)
+}
+
+func parseHexColor(color lipgloss.Color) (int, int, int, bool) {
+	raw := strings.TrimSpace(string(color))
+	if len(raw) != 7 || raw[0] != '#' {
+		return 0, 0, 0, false
+	}
+
+	parse := func(value string) (int, bool) {
+		n, err := strconv.ParseUint(value, 16, 8)
+		if err != nil {
+			return 0, false
+		}
+		return int(n), true
+	}
+
+	r, ok := parse(raw[1:3])
+	if !ok {
+		return 0, 0, 0, false
+	}
+	g, ok := parse(raw[3:5])
+	if !ok {
+		return 0, 0, 0, false
+	}
+	b, ok := parse(raw[5:7])
+	if !ok {
+		return 0, 0, 0, false
+	}
+	return r, g, b, true
+}
+
+func relativeLuminance(r, g, b int) float64 {
+	channel := func(value int) float64 {
+		srgb := float64(value) / 255.0
+		if srgb <= 0.04045 {
+			return srgb / 12.92
+		}
+		return math.Pow((srgb+0.055)/1.055, 2.4)
+	}
+
+	return 0.2126*channel(r) + 0.7152*channel(g) + 0.0722*channel(b)
 }

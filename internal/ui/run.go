@@ -444,9 +444,9 @@ func (m RunModel) renderPhysicsPanel(width, height int) string {
 		for x := 0; x < gridW; x++ {
 			switch {
 			case x == gx && y == gy:
-				b.WriteString(accentBadge(bgColor, accentCyan).Render("•"))
+				b.WriteString(accentBadge(accentCyan).Render("•"))
 			case x == gridW/2 && y == gridH/2:
-				b.WriteString(accentBadge(bgColor, accentPink).Render("◉"))
+				b.WriteString(accentBadge(accentPink).Render("◉"))
 			case x == gridW/2 || y == gridH/2:
 				b.WriteString(subtitleStyle().Render("·"))
 			case trail[[2]int{x, y}] > 0:
@@ -461,7 +461,7 @@ func (m RunModel) renderPhysicsPanel(width, height int) string {
 	}
 
 	title := strings.Join([]string{
-		accentBadge(bgColor, accentPink).Render(" ORBIT "),
+		accentBadge(accentPink).Render(" ORBIT "),
 		subtitleStyle().Render(fmt.Sprintf("x=%.1f y=%.1f", m.orbX, m.orbY)),
 	}, " ")
 
@@ -518,7 +518,7 @@ func renderPanel(title, body string, accent lipgloss.Color, width, height int) s
 		bodyHeight = 1
 	}
 
-	head := accentBadge(textColor, accent).Render(" " + title + " ")
+	head := accentBadge(accent).Render(" " + title + " ")
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		head,

@@ -137,7 +137,9 @@ Creates `.room/` in the current repository and seeds:
 
 ### `room run`
 
-Runs the improvement loop. Each iteration:
+Runs the improvement loop. In an interactive terminal, `room run` opens the live TUI by default. Set `ROOM_TUI=0` to force plain progress output instead.
+
+Each iteration:
 
 1. Reads config and local ROOM state.
 2. Builds a fresh prompt from the current instruction, recent summaries, prior next-instructions, git status, and recent commits.

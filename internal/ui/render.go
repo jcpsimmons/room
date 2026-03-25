@@ -100,7 +100,7 @@ func RenderDoctor(summary DoctorSummary) string {
 			label = "FAIL"
 		}
 		rows = append(rows, lipglossJoinHorizontal(
-			accentBadge(bgColor, accent).Render(" "+label+" "),
+			accentBadge(accent).Render(" "+label+" "),
 			titleStyle().Render(check.Name),
 			subtitleStyle().Render(check.Message),
 		))

@@ -55,13 +55,26 @@ func TestFormatRunProgress(t *testing.T) {
 
 func TestShouldUseRunUI(t *testing.T) {
 	t.Setenv("ROOM_TUI", "")
-	if shouldUseRunUI() {
-		t.Fatal("expected ROOM_TUI to default to disabled")
+	if !shouldUseRunUI() {
+		t.Fatal("expected ROOM_TUI to default to enabled")
 	}
 
-	t.Setenv("ROOM_TUI", "true")
-	if !shouldUseRunUI() {
-		t.Fatal("expected ROOM_TUI=true to enable the TUI")
+	for _, value := range []string{"0", "false", "no", "off"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("ROOM_TUI", value)
+			if shouldUseRunUI() {
+				t.Fatalf("expected ROOM_TUI=%q to disable the TUI", value)
+			}
+		})
+	}
+
+	for _, value := range []string{"1", "true", "yes", "on"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("ROOM_TUI", value)
+			if !shouldUseRunUI() {
+				t.Fatalf("expected ROOM_TUI=%q to enable the TUI", value)
+			}
+		})
 	}
 }
 

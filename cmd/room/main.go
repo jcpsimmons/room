@@ -292,10 +292,12 @@ func formatRunProgress(event app.RunProgressEvent) []string {
 
 func shouldUseRunUI() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("ROOM_TUI"))) {
+	case "0", "false", "no", "off":
+		return false
 	case "1", "true", "yes", "on":
 		return true
 	default:
-		return false
+		return true
 	}
 }
 
