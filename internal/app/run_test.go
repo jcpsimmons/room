@@ -200,6 +200,142 @@ func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	}
 }
 
+func TestRunEmitsProgressEventsOnSuccess(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Added parser guardrails",
+				NextInstruction: "Improve diagnostics around failures",
+				Status:          "continue",
+				CommitMessage:   "add parser guardrails",
+			},
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/file b/file"},
+		statsSeq:     []git.DiffStats{{Files: 1, Added: 10, Deleted: 2}},
+		commitHashes: []string{"abc123"},
+	}
+	var events []RunProgressEvent
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		Progress: func(event RunProgressEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+
+	wantPhases := []RunProgressPhase{
+		RunProgressPhaseRunStart,
+		RunProgressPhaseIterationStart,
+		RunProgressPhaseAgentExecutionStart,
+		RunProgressPhaseIterationSuccess,
+		RunProgressPhaseRunFinish,
+	}
+	if len(events) != len(wantPhases) {
+		t.Fatalf("event count = %d, want %d", len(events), len(wantPhases))
+	}
+	for i, want := range wantPhases {
+		if events[i].Phase != want {
+			t.Fatalf("event %d phase = %q, want %q", i, events[i].Phase, want)
+		}
+	}
+	if events[1].Iteration != 1 || events[2].Iteration != 1 || events[3].Iteration != 1 {
+		t.Fatalf("iteration number not propagated across events: %#v", events[1:4])
+	}
+	if events[3].Summary != "Added parser guardrails" {
+		t.Fatalf("success summary = %q", events[3].Summary)
+	}
+	if events[3].Status != "continue" {
+		t.Fatalf("success status = %q", events[3].Status)
+	}
+	if events[4].CompletedIterations != 1 {
+		t.Fatalf("finish completed iterations = %d", events[4].CompletedIterations)
+	}
+	if events[4].Status != "continue" || events[4].Err != nil {
+		t.Fatalf("finish event = %#v", events[4])
+	}
+}
+
+func TestRunEmitsProgressEventsOnFailure(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			err: errors.New("malformed codex JSON"),
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:     repoRoot,
+		dirtySeq: []bool{false, false},
+	}
+	var events []RunProgressEvent
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir:  repoRoot,
+		Iterations:  1,
+		MaxFailures: 1,
+		Progress: func(event RunProgressEvent) {
+			events = append(events, event)
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if report.Failures != 1 {
+		t.Fatalf("failures = %d", report.Failures)
+	}
+
+	wantPhases := []RunProgressPhase{
+		RunProgressPhaseRunStart,
+		RunProgressPhaseIterationStart,
+		RunProgressPhaseAgentExecutionStart,
+		RunProgressPhaseIterationFailure,
+		RunProgressPhaseRunFinish,
+	}
+	if len(events) != len(wantPhases) {
+		t.Fatalf("event count = %d, want %d", len(events), len(wantPhases))
+	}
+	for i, want := range wantPhases {
+		if events[i].Phase != want {
+			t.Fatalf("event %d phase = %q, want %q", i, events[i].Phase, want)
+		}
+	}
+	if events[3].Err == nil || events[3].Err.Error() != "malformed codex JSON" {
+		t.Fatalf("failure error = %#v", events[3].Err)
+	}
+	if events[4].Err == nil {
+		t.Fatalf("run finish should report the terminal error")
+	}
+}
+
 func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, paths := prepareInitializedRepo(t, repoRoot)

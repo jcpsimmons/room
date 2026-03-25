@@ -8,12 +8,17 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jcpsimmons/room/internal/app"
 	"github.com/jcpsimmons/room/internal/git"
+	"github.com/jcpsimmons/room/internal/ui"
 	"github.com/jcpsimmons/room/internal/version"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -60,7 +65,7 @@ func newInitCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return renderLines(report.Lines)
+			return renderInit(report)
 		},
 	}
 	return cmd
@@ -77,6 +82,9 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			opts.AllowDirtySet = cmd.Flags().Changed("allow-dirty")
 			opts.VerboseSet = cmd.Flags().Changed("verbose")
 			opts.JSONSet = cmd.Flags().Changed("json")
+			if !opts.JSON && canStyleOutput() {
+				return runWithUI(ctx, svc, opts)
+			}
 			report, err := svc.Run(ctx, opts)
 			if opts.JSON {
 				return printJSON(report, err)
@@ -118,7 +126,7 @@ func newStatusCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return renderLines(report.Lines)
+			return renderStatus(report)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
@@ -143,7 +151,7 @@ func newDoctorCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return renderLines(report.Lines)
+			return renderDoctor(report)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
@@ -186,6 +194,245 @@ func newVersionCommand(info version.Info) *cobra.Command {
 	}
 }
 
+func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
+	total := opts.Iterations
+	if total <= 0 {
+		total = 1
+	}
+
+	model := ui.NewRunModel(total)
+	program := tea.NewProgram(
+		model,
+		tea.WithAltScreen(),
+		tea.WithContext(ctx),
+		tea.WithInput(nil),
+		tea.WithoutSignalHandler(),
+	)
+
+	type runResult struct {
+		report app.RunReport
+		err    error
+	}
+
+	resultCh := make(chan runResult, 1)
+	opts.Progress = func(event app.RunProgressEvent) {
+		program.Send(ui.ProgressMsg{Event: toUIProgressEvent(event)})
+	}
+
+	go func() {
+		report, err := svc.Run(ctx, opts)
+		resultCh <- runResult{report: report, err: err}
+		time.Sleep(120 * time.Millisecond)
+		program.Quit()
+	}()
+
+	_, uiErr := program.Run()
+	result := <-resultCh
+
+	renderErr := renderRun(result.report)
+	if uiErr != nil && !errors.Is(uiErr, tea.ErrProgramKilled) {
+		return errors.Join(result.err, renderErr, uiErr)
+	}
+	return errors.Join(result.err, renderErr)
+}
+
+func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
+	total := event.RequestedIterations
+	if total <= 0 {
+		total = max(event.CompletedIterations+1, 1)
+	}
+
+	progressValue := 0.0
+	if total > 0 {
+		progressValue = float64(event.CompletedIterations) / float64(total)
+	}
+
+	out := ui.ProgressEvent{
+		Kind:         ui.ProgressStep,
+		Iteration:    event.Iteration,
+		Total:        total,
+		Completed:    event.CompletedIterations,
+		Failures:     event.Failures,
+		Percent:      progressValue,
+		HasIteration: event.Iteration > 0,
+		HasTotal:     total > 0,
+		HasCompleted: true,
+		HasFailures:  true,
+		HasPercent:   total > 0,
+		When:         progressWhen(event),
+	}
+
+	switch event.Phase {
+	case app.RunProgressPhaseRunStart:
+		out.Kind = ui.ProgressStart
+		out.Title = "igniting the room"
+		out.Detail = fmt.Sprintf("%s via %s", event.RepoRoot, strings.ToUpper(event.Provider))
+	case app.RunProgressPhaseIterationStart:
+		out.Kind = ui.ProgressStep
+		out.Title = fmt.Sprintf("iteration %d armed", event.Iteration)
+		out.Detail = event.RunDir
+	case app.RunProgressPhaseAgentExecutionStart:
+		out.Kind = ui.ProgressStep
+		out.Title = fmt.Sprintf("%s is cooking", strings.ToUpper(event.Provider))
+		out.Detail = fmt.Sprintf("iteration %d prompt locked in", event.Iteration)
+	case app.RunProgressPhaseIterationSuccess:
+		out.Kind = ui.ProgressComplete
+		out.Title = fmt.Sprintf("iteration %d landed", event.Iteration)
+		if event.Summary != "" {
+			out.Detail = event.Summary
+		} else if event.DryRun {
+			out.Detail = "dry run prepared artifacts without executing the agent"
+		} else {
+			out.Detail = "iteration completed cleanly"
+		}
+		switch event.Status {
+		case "pivot":
+			out.Kind = ui.ProgressPivot
+		case "done":
+			out.Kind = ui.ProgressDone
+			out.Percent = 1
+			out.HasPercent = true
+		}
+	case app.RunProgressPhaseIterationFailure:
+		out.Kind = ui.ProgressFailure
+		out.Title = fmt.Sprintf("iteration %d glitched", event.Iteration)
+		out.Detail = errorText(event.Err, "agent execution failed")
+	case app.RunProgressPhaseRunFinish:
+		switch {
+		case event.Err != nil:
+			out.Kind = ui.ProgressFailure
+			out.Title = "run halted"
+			out.Detail = event.Err.Error()
+		case event.Status == "dry_run":
+			out.Kind = ui.ProgressComplete
+			out.Title = "dry run complete"
+			out.Detail = "artifacts were generated without invoking the agent"
+			out.Percent = 1
+			out.HasPercent = true
+		case event.Status == "done":
+			out.Kind = ui.ProgressDone
+			out.Title = "run complete"
+			out.Detail = "agent says the repo is done"
+			out.Percent = 1
+			out.HasPercent = true
+		default:
+			out.Kind = ui.ProgressComplete
+			out.Title = "requested loop complete"
+			out.Detail = fmt.Sprintf("%d iterations finished", event.CompletedIterations)
+			if total > 0 && event.CompletedIterations >= total {
+				out.Percent = 1
+				out.HasPercent = true
+			}
+		}
+	}
+
+	return out
+}
+
+func progressWhen(event app.RunProgressEvent) time.Time {
+	switch {
+	case !event.FinishedAt.IsZero():
+		return event.FinishedAt
+	case !event.StartedAt.IsZero():
+		return event.StartedAt
+	default:
+		return time.Now()
+	}
+}
+
+func renderInit(report app.InitReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	summary := ui.InitSummary{
+		RepoRoot:  report.RepoRoot,
+		RoomDir:   report.RoomDir,
+		NextSteps: []string{"room doctor", "room inspect", "room run --iterations 5"},
+	}
+	for _, line := range report.Lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "ROOM ignores ") || strings.HasPrefix(trimmed, "Recommendation:") {
+			summary.MissingIgnore = true
+			if summary.IgnoreAdvisory != "" {
+				summary.IgnoreAdvisory += "\n"
+			}
+			summary.IgnoreAdvisory += trimmed
+		}
+	}
+	return renderBlock(ui.RenderInit(summary))
+}
+
+func renderStatus(report app.StatusReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	recentSummaries := make([]string, 0, len(report.RecentSummaries))
+	for _, summary := range report.RecentSummaries {
+		recentSummaries = append(recentSummaries, fmt.Sprintf("#%d [%s] %s", summary.Iteration, summary.Status, summary.Summary))
+	}
+
+	return renderBlock(ui.RenderStatus(ui.StatusSummary{
+		RepoRoot:           report.RepoRoot,
+		Provider:           report.Provider,
+		Iteration:          report.State.CurrentIteration,
+		LastRun:            formatStatusTime(report.State.LastRunAt),
+		LastStatus:         report.State.LastStatus,
+		Dirty:              report.Dirty,
+		CurrentInstruction: report.CurrentInstruction,
+		RecentCommits:      report.RecentCommits,
+		RecentSummaries:    recentSummaries,
+	}))
+}
+
+func renderDoctor(report app.DoctorReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	checks := make([]ui.Check, 0, len(report.Checks))
+	var notes []string
+	for _, check := range report.Checks {
+		checks = append(checks, ui.Check{
+			Name:    check.Name,
+			OK:      check.OK,
+			Message: check.Message,
+		})
+		if check.Name == "expectation" || (check.Name == "state" && strings.Contains(check.Message, "not initialized")) {
+			notes = append(notes, check.Message)
+		}
+	}
+
+	return renderBlock(ui.RenderDoctor(ui.DoctorSummary{
+		RepoRoot: report.RepoRoot,
+		Checks:   checks,
+		Notes:    notes,
+	}))
+}
+
+func renderRun(report app.RunReport) error {
+	if !canStyleOutput() {
+		return renderLines(report.Lines)
+	}
+
+	return renderBlock(ui.RenderRun(ui.RunSummary{
+		RepoRoot:            report.RepoRoot,
+		Provider:            report.Provider,
+		RequestedIterations: report.RequestedIterations,
+		CompletedIterations: report.CompletedIterations,
+		Failures:            report.Failures,
+		LastStatus:          report.LastStatus,
+		LastRunDir:          report.LastRunDir,
+		Timeline:            report.Lines,
+	}))
+}
+
+func renderBlock(block string) error {
+	_, err := fmt.Fprintln(os.Stdout, block)
+	return err
+}
+
 func renderLines(lines []string) error {
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(os.Stdout, line); err != nil {
@@ -217,4 +464,40 @@ func mustWD() string {
 		panic(err)
 	}
 	return filepath.Clean(wd)
+}
+
+func canStyleOutput() bool {
+	if os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func formatStatusTime(value any) string {
+	switch t := value.(type) {
+	case interface {
+		IsZero() bool
+		Format(string) string
+	}:
+		if t.IsZero() {
+			return "never"
+		}
+		return t.Format(time.RFC3339)
+	default:
+		return "unknown"
+	}
+}
+
+func errorText(err error, fallback string) string {
+	if err == nil {
+		return fallback
+	}
+	return err.Error()
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

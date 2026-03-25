@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/config"
@@ -34,6 +35,40 @@ type RunOptions struct {
 	InstructionFile string
 	ConfigPath      string
 	CommitPrefix    string
+	Progress        func(RunProgressEvent)
+}
+
+type RunProgressPhase string
+
+const (
+	RunProgressPhaseRunStart            RunProgressPhase = "run_start"
+	RunProgressPhaseIterationStart      RunProgressPhase = "iteration_start"
+	RunProgressPhaseAgentExecutionStart RunProgressPhase = "agent_execution_start"
+	RunProgressPhaseIterationSuccess    RunProgressPhase = "iteration_success"
+	RunProgressPhaseIterationFailure    RunProgressPhase = "iteration_failure"
+	RunProgressPhaseRunFinish           RunProgressPhase = "run_finish"
+)
+
+type RunProgressEvent struct {
+	Phase               RunProgressPhase `json:"phase"`
+	RepoRoot            string           `json:"repo_root"`
+	Provider            string           `json:"provider"`
+	RequestedIterations int              `json:"requested_iterations"`
+	CompletedIterations int              `json:"completed_iterations"`
+	Failures            int              `json:"failures"`
+	Iteration           int              `json:"iteration"`
+	RunDir              string           `json:"run_dir"`
+	PromptPath          string           `json:"prompt_path"`
+	Status              string           `json:"status"`
+	Summary             string           `json:"summary"`
+	NextInstruction     string           `json:"next_instruction"`
+	CommitMessage       string           `json:"commit_message"`
+	DryRun              bool             `json:"dry_run"`
+	CommitEnabled       bool             `json:"commit_enabled"`
+	Err                 error            `json:"-"`
+	StartedAt           time.Time        `json:"started_at"`
+	FinishedAt          time.Time        `json:"finished_at"`
+	Duration            time.Duration    `json:"duration"`
 }
 
 type RunReport struct {
@@ -47,7 +82,7 @@ type RunReport struct {
 	Lines               []string `json:"lines"`
 }
 
-func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
+func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, err error) {
 	repoRoot, err := s.requireRepo(ctx, opts.WorkingDir)
 	if err != nil {
 		return RunReport{}, err
@@ -83,6 +118,22 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 	if strings.TrimSpace(opts.CommitPrefix) != "" {
 		commitPrefix = opts.CommitPrefix
 	}
+	progress := opts.Progress
+	defer func() {
+		emitRunProgress(progress, RunProgressEvent{
+			Phase:               RunProgressPhaseRunFinish,
+			RepoRoot:            repoRoot,
+			Provider:            report.Provider,
+			RequestedIterations: report.RequestedIterations,
+			CompletedIterations: report.CompletedIterations,
+			Failures:            report.Failures,
+			RunDir:              report.LastRunDir,
+			Status:              report.LastStatus,
+			DryRun:              opts.DryRun,
+			CommitEnabled:       commitEnabled,
+			Err:                 err,
+		})
+	}()
 
 	snapshot, err := state.Load(paths.StatePath)
 	if err != nil {
@@ -108,6 +159,20 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 	if err != nil {
 		return RunReport{}, err
 	}
+
+	report = RunReport{
+		RepoRoot:            repoRoot,
+		Provider:            provider,
+		RequestedIterations: opts.Iterations,
+	}
+
+	emitRunProgress(progress, RunProgressEvent{
+		Phase:               RunProgressPhaseRunStart,
+		RepoRoot:            repoRoot,
+		Provider:            provider,
+		RequestedIterations: opts.Iterations,
+		CommitEnabled:       commitEnabled,
+	})
 
 	lines := []string{
 		fmt.Sprintf("ROOM run in %s", repoRoot),
@@ -138,6 +203,16 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		}
 
 		nextIteration := snapshot.CurrentIteration + 1
+		emitRunProgress(progress, RunProgressEvent{
+			Phase:               RunProgressPhaseIterationStart,
+			RepoRoot:            repoRoot,
+			Provider:            provider,
+			RequestedIterations: opts.Iterations,
+			CompletedIterations: completed,
+			Failures:            failures,
+			Iteration:           nextIteration,
+			CommitEnabled:       commitEnabled,
+		})
 		runDir := filepath.Join(paths.RunsDir, fmt.Sprintf("%04d", nextIteration))
 		if err := fsutil.EnsureDir(runDir); err != nil {
 			return RunReport{}, err
@@ -187,6 +262,28 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		if opts.DryRun {
 			lines = append(lines, fmt.Sprintf("Dry run prepared prompt for iteration %d at %s", nextIteration, promptPath))
 			completed++
+			snapshot.LastStatus = "dry_run"
+			if err := s.saveState(paths.StatePath, snapshot); err != nil {
+				return RunReport{}, err
+			}
+			report.CompletedIterations = completed
+			report.Failures = failures
+			report.LastStatus = snapshot.LastStatus
+			report.LastRunDir = runDir
+			emitRunProgress(progress, RunProgressEvent{
+				Phase:               RunProgressPhaseIterationSuccess,
+				RepoRoot:            repoRoot,
+				Provider:            provider,
+				RequestedIterations: opts.Iterations,
+				CompletedIterations: completed,
+				Failures:            failures,
+				Iteration:           nextIteration,
+				RunDir:              runDir,
+				PromptPath:          promptPath,
+				Status:              "dry_run",
+				DryRun:              true,
+				CommitEnabled:       commitEnabled,
+			})
 			if !opts.UntilDone {
 				continue
 			}
@@ -196,6 +293,19 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		resultPath := filepath.Join(runDir, "result.json")
 		executionPath := filepath.Join(runDir, "execution.json")
 		startedAt := s.now()
+		emitRunProgress(progress, RunProgressEvent{
+			Phase:               RunProgressPhaseAgentExecutionStart,
+			RepoRoot:            repoRoot,
+			Provider:            provider,
+			RequestedIterations: opts.Iterations,
+			CompletedIterations: completed,
+			Failures:            failures,
+			Iteration:           nextIteration,
+			RunDir:              runDir,
+			PromptPath:          promptPath,
+			StartedAt:           startedAt.UTC(),
+			CommitEnabled:       commitEnabled,
+		})
 		execution, runErr := runner.Run(ctx, agent.Prompt{Body: promptBody}, agent.Schema{Path: paths.SchemaPath}, s.runOptionsForProvider(cfg, repoRoot), resultPath)
 		finishedAt := s.now()
 
@@ -235,6 +345,23 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, errors.Join(runErr, err)
 			}
+			emitRunProgress(progress, RunProgressEvent{
+				Phase:               RunProgressPhaseIterationFailure,
+				RepoRoot:            repoRoot,
+				Provider:            provider,
+				RequestedIterations: opts.Iterations,
+				CompletedIterations: completed,
+				Failures:            failures,
+				Iteration:           nextIteration,
+				RunDir:              runDir,
+				PromptPath:          promptPath,
+				Status:              "failed",
+				Err:                 runErr,
+				CommitEnabled:       commitEnabled,
+				StartedAt:           startedAt.UTC(),
+				FinishedAt:          finishedAt.UTC(),
+				Duration:            finishedAt.Sub(startedAt),
+			})
 			lines = append(lines, fmt.Sprintf("Iteration %d failed: %v", nextIteration, runErr))
 			unsafe, unsafeErr := s.git.IsDirty(ctx, repoRoot)
 			if unsafeErr == nil && unsafe {
@@ -346,8 +473,32 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 			line += fmt.Sprintf(" | forced pivot: %s", strings.Join(dedupe.Reasons, "; "))
 		}
 		lines = append(lines, line)
-
 		completed++
+		report.CompletedIterations = completed
+		report.Failures = failures
+		report.LastStatus = statusValue
+		report.LastRunDir = runDir
+		emitRunProgress(progress, RunProgressEvent{
+			Phase:               RunProgressPhaseIterationSuccess,
+			RepoRoot:            repoRoot,
+			Provider:            provider,
+			RequestedIterations: opts.Iterations,
+			CompletedIterations: completed,
+			Failures:            failures,
+			Iteration:           nextIteration,
+			RunDir:              runDir,
+			PromptPath:          promptPath,
+			Status:              statusValue,
+			Summary:             execution.Result.Summary,
+			NextInstruction:     nextInstruction,
+			CommitMessage:       execution.Result.CommitMessage,
+			DryRun:              false,
+			CommitEnabled:       commitEnabled,
+			StartedAt:           startedAt.UTC(),
+			FinishedAt:          finishedAt.UTC(),
+			Duration:            finishedAt.Sub(startedAt),
+		})
+
 		if statusValue == "done" {
 			lines = append(lines, "Agent reported done. Stopping.")
 			break
@@ -367,6 +518,12 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		LastRunDir:          snapshot.LastRunDirectory,
 		Lines:               lines,
 	}, nil
+}
+
+func emitRunProgress(fn func(RunProgressEvent), event RunProgressEvent) {
+	if fn != nil {
+		fn(event)
+	}
 }
 
 func (s *Service) requireRepo(ctx context.Context, workingDir string) (string, error) {
