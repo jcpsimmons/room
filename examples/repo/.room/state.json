@@ -7,7 +7,7 @@
   "updated_at": "2026-03-25T00:00:00Z",
   "last_run_at": "0001-01-01T00:00:00Z",
   "last_commit_hash": "",
-  "current_instruction_hash": "",
+  "current_instruction_hash": "037e19a719df656cab5da5001d7786c9337d22d135d78c456e4b62bee4e04b29",
   "room_version": "dev",
   "last_codex_version": "",
   "consecutive_no_change": 0,

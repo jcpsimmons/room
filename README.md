@@ -23,6 +23,7 @@ ROOM assumes:
 - `git` is installed
 - `codex` is installed separately
 - Codex is already authenticated
+- Codex is new enough for ROOM's headless JSON workflow
 - you are running inside a git repository
 
 Check the environment with:
@@ -34,6 +35,14 @@ room doctor
 ## Install
 
 Manual binary download is the primary path.
+
+Release assets include:
+
+- `room_darwin_amd64.tar.gz`
+- `room_darwin_arm64.tar.gz`
+- `room_linux_amd64.tar.gz`
+- `room_linux_arm64.tar.gz`
+- `checksums.txt`
 
 ### macOS arm64
 
@@ -119,7 +128,7 @@ Runs the improvement loop. Each iteration:
 2. Builds a fresh prompt from the current instruction, recent summaries, prior next-instructions, git status, and recent commits.
 3. Calls `codex exec` headlessly.
 4. Requires JSON matching the ROOM schema.
-5. Stores prompt, stdout, stderr, result, and diff artifacts.
+5. Stores prompt, execution metadata, stdout, stderr, result, and diff artifacts.
 6. Optionally commits the change with a consistent prefix.
 7. Updates the next instruction, or forces a pivot if the loop is stagnating.
 
@@ -137,7 +146,7 @@ Checks:
 
 - `git`
 - `codex`
-- Codex version visibility
+- Codex version support
 - Codex login status
 - repo detection
 - config parsing
@@ -164,6 +173,7 @@ ROOM stores all local orchestration state in `.room/`.
   runs/
     0001/
       prompt.txt
+      execution.json
       result.json
       stdout.log
       stderr.log
@@ -201,7 +211,7 @@ When the loop stalls, ROOM rewrites the next instruction into a forced pivot ins
 If a run fails:
 
 - inspect `.room/runs/<n>/`
-- read `stderr.log`, `stdout.log`, and `result.json`
+- read `execution.json`, `stderr.log`, `stdout.log`, and `result.json`
 - inspect `diff.patch`
 - run `room status`
 

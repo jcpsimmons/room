@@ -4,6 +4,18 @@ set -eu
 REPO="${ROOM_INSTALL_REPO:-jcpsimmons/room}"
 VERSION="${ROOM_VERSION:-latest}"
 
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+need_cmd uname
+need_cmd curl
+need_cmd tar
+need_cmd install
+
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 
@@ -53,3 +65,6 @@ mkdir -p "$target_dir"
 install -m 0755 "${tmpdir}/room" "${target_dir}/room"
 
 echo "installed room to ${target_dir}/room"
+if ! printf '%s' "${PATH}" | tr ':' '\n' | grep -Fx "${target_dir}" >/dev/null 2>&1; then
+  echo "note: ${target_dir} is not currently on PATH" >&2
+fi

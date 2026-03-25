@@ -76,6 +76,10 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 		Short: "Run the improvement loop",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts.WorkingDir = mustWD()
+			opts.UntilDoneSet = cmd.Flags().Changed("until-done")
+			opts.AllowDirtySet = cmd.Flags().Changed("allow-dirty")
+			opts.VerboseSet = cmd.Flags().Changed("verbose")
+			opts.JSONSet = cmd.Flags().Changed("json")
 			report, err := svc.Run(ctx, opts)
 			if opts.JSON {
 				return printJSON(report, err)

@@ -56,9 +56,11 @@ func (f *fakeRunner) Run(_ context.Context, prompt codex.Prompt, _ codex.Schema,
 	}
 
 	return codex.Execution{
-		Result: run.result,
-		Stdout: run.stdout,
-		Stderr: run.stderr,
+		Result:     run.result,
+		Stdout:     run.stdout,
+		Stderr:     run.stderr,
+		Command:    []string{"codex", "exec"},
+		DurationMS: 1250,
 	}, run.err
 }
 
@@ -184,6 +186,14 @@ func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	if snapshot.LastCommitHash != "abc123" {
 		t.Fatalf("last commit hash = %q", snapshot.LastCommitHash)
 	}
+
+	data, err := os.ReadFile(filepath.Join(paths.RunsDir, "0001", "execution.json"))
+	if err != nil {
+		t.Fatalf("read execution artifact: %v", err)
+	}
+	if !strings.Contains(string(data), "\"duration_ms\": 1250") {
+		t.Fatalf("execution artifact missing duration: %s", string(data))
+	}
 }
 
 func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
@@ -270,6 +280,63 @@ func TestRunStopsAfterFailureThreshold(t *testing.T) {
 	}
 	if report.Failures != 1 {
 		t.Fatalf("failures = %d", report.Failures)
+	}
+}
+
+func TestRunUsesConfigUntilDoneWhenFlagIsUnset(t *testing.T) {
+	repoRoot := t.TempDir()
+	cfg, paths := prepareInitializedRepo(t, repoRoot)
+	cfg.Run.UntilDone = true
+	if err := config.Save(paths.ConfigPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{
+			{
+				result: codex.Result{
+					Summary:         "Added a reliability check",
+					NextInstruction: "Improve diagnostics around failures",
+					Status:          "continue",
+					CommitMessage:   "add reliability check",
+				},
+			},
+			{
+				result: codex.Result{
+					Summary:         "Confirmed the loop is complete",
+					NextInstruction: "No materially useful work remains.",
+					Status:          "done",
+					CommitMessage:   "record completion",
+				},
+			},
+		},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/file b/file", ""},
+		statsSeq:     []git.DiffStats{{Files: 1, Added: 8, Deleted: 2}, {}},
+		commitHashes: []string{"abc123"},
+	}
+	svc := NewService(Dependencies{
+		Git:     fakeGit,
+		Runner:  runner,
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 2 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	if report.LastStatus != "done" {
+		t.Fatalf("last status = %q", report.LastStatus)
 	}
 }
 

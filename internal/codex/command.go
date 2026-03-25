@@ -37,9 +37,19 @@ func BuildCommand(prompt Prompt, schema Schema, outputPath string, opts RunOptio
 		return nil, fmt.Errorf("output path is required")
 	}
 
-	args := []string{"exec", "--cd", opts.WorkDir, "--sandbox", opts.Sandbox, "--ask-for-approval", opts.Approval, "--output-schema", schema.Path, "--output-last-message", outputPath, "--color", "never", "--ephemeral", "-"}
-	if strings.TrimSpace(opts.Model) != "" {
-		args = append([]string{"exec", "--cd", opts.WorkDir, "--sandbox", opts.Sandbox, "--ask-for-approval", opts.Approval, "--model", opts.Model, "--output-schema", schema.Path, "--output-last-message", outputPath, "--color", "never", "--ephemeral", "-"})
+	sandbox := strings.TrimSpace(opts.Sandbox)
+	if sandbox == "" {
+		sandbox = "danger-full-access"
 	}
+	approval := strings.TrimSpace(opts.Approval)
+	if approval == "" {
+		approval = "never"
+	}
+
+	args := []string{"--ask-for-approval", approval, "exec", "--cd", opts.WorkDir, "--sandbox", sandbox}
+	if strings.TrimSpace(opts.Model) != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	args = append(args, "--output-schema", schema.Path, "--output-last-message", outputPath, "--color", "never", "--ephemeral", "-")
 	return append([]string{opts.Binary}, args...), nil
 }

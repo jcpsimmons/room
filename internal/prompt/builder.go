@@ -31,6 +31,10 @@ func Build(input BuildInput) string {
 	b.WriteString("- Avoid cosmetic churn.\n")
 	b.WriteString("- Do not ask follow-up questions.\n")
 	b.WriteString("- Return only JSON that matches the supplied schema.\n\n")
+	b.WriteString("Status semantics:\n")
+	b.WriteString("- Use status=continue when the next instruction should stay on a productive trajectory.\n")
+	b.WriteString("- Use status=pivot when this angle is exhausted but other useful work remains.\n")
+	b.WriteString("- Use status=done only when no materially useful improvement remains.\n\n")
 	b.WriteString(fmt.Sprintf("Repository path: %s\n\n", input.RepoPath))
 
 	b.WriteString("Recent summaries:\n")
@@ -67,9 +71,15 @@ func Build(input BuildInput) string {
 		b.WriteByte('\n')
 	}
 
+	b.WriteString("\nStagnation rules:\n")
+	b.WriteString("- Do not repeat recent next instructions or simply restate recent summaries.\n")
+	b.WriteString("- If a recent direction looks exhausted, choose a distinctly different subsystem or concern.\n")
+	b.WriteString("- Prefer bugs, reliability, tests, typing, maintainability, performance, diagnostics, and useful docs.\n")
+	b.WriteString("- If obvious improvements are exhausted, propose a creative but still concrete improvement.\n")
+
 	b.WriteString("\nResponse contract:\n")
 	b.WriteString("- summary: short description of the improvement you made\n")
-	b.WriteString("- next_instruction: the next direction ROOM should try\n")
+	b.WriteString("- next_instruction: the next direction ROOM should try; keep it concrete and non-repetitive\n")
 	b.WriteString("- status: continue, pivot, or done\n")
 	b.WriteString("- commit_message: concise commit message body without the ROOM prefix if possible\n")
 

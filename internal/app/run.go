@@ -22,12 +22,16 @@ type RunOptions struct {
 	WorkingDir      string
 	Iterations      int
 	UntilDone       bool
+	UntilDoneSet    bool
 	MaxFailures     int
 	NoCommit        bool
 	AllowDirty      bool
+	AllowDirtySet   bool
 	DryRun          bool
 	Verbose         bool
+	VerboseSet      bool
 	JSON            bool
+	JSONSet         bool
 	InstructionFile string
 	ConfigPath      string
 	CommitPrefix    string
@@ -62,13 +66,16 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 	if opts.MaxFailures <= 0 {
 		opts.MaxFailures = cfg.Run.MaxFailures
 	}
-	if !opts.AllowDirty {
+	if !opts.UntilDoneSet {
+		opts.UntilDone = cfg.Run.UntilDone
+	}
+	if !opts.AllowDirtySet {
 		opts.AllowDirty = cfg.Run.AllowDirty
 	}
-	if !opts.Verbose {
+	if !opts.VerboseSet {
 		opts.Verbose = cfg.Output.Verbose
 	}
-	if !opts.JSON {
+	if !opts.JSONSet {
 		opts.JSON = cfg.Output.JSON
 	}
 	commitEnabled := cfg.Run.Commit && !opts.NoCommit
@@ -90,7 +97,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		return RunReport{}, errors.New("repository is dirty; re-run with --allow-dirty to override")
 	}
 
-	codexVersion, err := s.runner.Version(ctx, cfg.Codex.Binary)
+	codexVersion, err := s.codexVersion(ctx, cfg.Codex.Binary)
 	if err != nil {
 		return RunReport{}, err
 	}
@@ -108,7 +115,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		if ctx.Err() != nil {
 			snapshot.LastStatus = "interrupted"
 			snapshot.LastRunAt = s.now().UTC()
-			if saveErr := state.Save(paths.StatePath, snapshot); saveErr != nil {
+			if saveErr := s.saveState(paths.StatePath, snapshot); saveErr != nil {
 				return RunReport{}, errors.Join(ctx.Err(), saveErr)
 			}
 			return RunReport{
@@ -165,7 +172,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		snapshot.CurrentIteration = nextIteration
 		snapshot.LastRunDirectory = runDir
 		snapshot.LastRunAt = s.now().UTC()
-		if err := state.Save(paths.StatePath, snapshot); err != nil {
+		if err := s.saveState(paths.StatePath, snapshot); err != nil {
 			return RunReport{}, err
 		}
 
@@ -179,6 +186,8 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		}
 
 		resultPath := filepath.Join(runDir, "result.json")
+		executionPath := filepath.Join(runDir, "execution.json")
+		startedAt := s.now()
 		execution, runErr := s.runner.Run(ctx, codex.Prompt{Body: promptBody}, codex.Schema{Path: paths.SchemaPath}, codex.RunOptions{
 			Binary:   cfg.Codex.Binary,
 			WorkDir:  repoRoot,
@@ -187,6 +196,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 			Approval: cfg.Codex.Approval,
 			Timeout:  time.Duration(cfg.Codex.TimeoutSeconds) * time.Second,
 		}, resultPath)
+		finishedAt := s.now()
 
 		if err := fsutil.AtomicWriteFile(filepath.Join(runDir, "stdout.log"), []byte(execution.Stdout), 0o644); err != nil {
 			return RunReport{}, err
@@ -194,12 +204,33 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		if err := fsutil.AtomicWriteFile(filepath.Join(runDir, "stderr.log"), []byte(execution.Stderr), 0o644); err != nil {
 			return RunReport{}, err
 		}
+		if err := writeExecutionArtifact(executionPath, execution, startedAt, finishedAt, runErr); err != nil {
+			return RunReport{}, err
+		}
+
+		if ctx.Err() != nil && !execution.TimedOut {
+			snapshot.LastStatus = "interrupted"
+			snapshot.LastRunAt = finishedAt.UTC()
+			if err := s.saveState(paths.StatePath, snapshot); err != nil {
+				return RunReport{}, errors.Join(ctx.Err(), err)
+			}
+			lines = append(lines, fmt.Sprintf("Iteration %d interrupted.", nextIteration))
+			return RunReport{
+				RepoRoot:            repoRoot,
+				RequestedIterations: opts.Iterations,
+				CompletedIterations: completed,
+				Failures:            failures,
+				LastStatus:          snapshot.LastStatus,
+				LastRunDir:          runDir,
+				Lines:               lines,
+			}, ctx.Err()
+		}
 
 		if runErr != nil {
 			failures++
 			snapshot.TotalFailures++
 			snapshot.LastStatus = "failed"
-			if err := state.Save(paths.StatePath, snapshot); err != nil {
+			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, errors.Join(runErr, err)
 			}
 			lines = append(lines, fmt.Sprintf("Iteration %d failed: %v", nextIteration, runErr))
@@ -302,7 +333,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		snapshot.LastNextInstruction = nextInstruction
 		snapshot.CurrentInstructionHash = state.InstructionHash(nextInstruction)
 		snapshot.RoomVersion = s.version.Version
-		if err := state.Save(paths.StatePath, snapshot); err != nil {
+		if err := s.saveState(paths.StatePath, snapshot); err != nil {
 			return RunReport{}, err
 		}
 

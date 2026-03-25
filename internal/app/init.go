@@ -55,9 +55,13 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		}
 	}
 	if !fsutil.FileExists(paths.StatePath) {
+		currentInstruction, err := readTrimmed(paths.InstructionPath)
+		if err != nil {
+			return InitReport{}, err
+		}
 		snapshot := state.New(s.version.Version, s.now())
-		snapshot.CurrentInstructionHash = state.InstructionHash(prompt.DefaultSeedInstruction())
-		if err := state.Save(paths.StatePath, snapshot); err != nil {
+		snapshot.CurrentInstructionHash = state.InstructionHash(currentInstruction)
+		if err := s.saveState(paths.StatePath, snapshot); err != nil {
 			return InitReport{}, err
 		}
 	}

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jcpsimmons/room/internal/codex"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
+	"github.com/jcpsimmons/room/internal/state"
 )
 
 type DoctorOptions struct {
@@ -78,6 +80,11 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 			checks = append(checks, DoctorCheck{Name: "codex", OK: false, Message: versionErr.Error()})
 		} else {
 			checks = append(checks, DoctorCheck{Name: "codex", OK: true, Message: fmt.Sprintf("Codex available: %s", versionText)})
+			if err := codex.ValidateVersion(versionText); err != nil {
+				checks = append(checks, DoctorCheck{Name: "codex_version", OK: false, Message: err.Error()})
+			} else {
+				checks = append(checks, DoctorCheck{Name: "codex_version", OK: true, Message: fmt.Sprintf("Codex version is supported (requires %s or newer)", codex.MinimumSupportedVersion())})
+			}
 		}
 		statusOut, statusErr := exec.CommandContext(ctx, codexBinary, "login", "status").CombinedOutput()
 		if statusErr != nil {
@@ -91,7 +98,26 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 
 	paths := config.ResolvePaths(repoRoot, configPath, cfg)
 	if fsutil.DirExists(paths.RoomDir) {
-		checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: fmt.Sprintf("ROOM state directory exists: %s", paths.RoomDir)})
+		var problems []string
+		if !fsutil.FileExists(paths.ConfigPath) {
+			problems = append(problems, "missing config.toml")
+		}
+		if !fsutil.FileExists(paths.InstructionPath) {
+			problems = append(problems, "missing instruction.txt")
+		}
+		if !fsutil.FileExists(paths.SchemaPath) {
+			problems = append(problems, "missing schema.json")
+		}
+		if !fsutil.FileExists(paths.StatePath) {
+			problems = append(problems, "missing state.json")
+		} else if _, err := state.Load(paths.StatePath); err != nil {
+			problems = append(problems, fmt.Sprintf("state load failed: %v", err))
+		}
+		if len(problems) == 0 {
+			checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: fmt.Sprintf("ROOM state directory is healthy: %s", paths.RoomDir)})
+		} else {
+			checks = append(checks, DoctorCheck{Name: "state", OK: false, Message: strings.Join(problems, "; ")})
+		}
 	} else {
 		checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: "ROOM is not initialized yet; `room init` will create state files"})
 	}

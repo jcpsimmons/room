@@ -54,8 +54,17 @@ func Load(path string) (Snapshot, error) {
 }
 
 func Save(path string, snapshot Snapshot) error {
-	snapshot.UpdatedAt = snapshot.UpdatedAt.UTC()
-	snapshot.CreatedAt = snapshot.CreatedAt.UTC()
+	return SaveAt(path, snapshot, time.Now())
+}
+
+func SaveAt(path string, snapshot Snapshot, now time.Time) error {
+	now = now.UTC()
+	if snapshot.CreatedAt.IsZero() {
+		snapshot.CreatedAt = now
+	} else {
+		snapshot.CreatedAt = snapshot.CreatedAt.UTC()
+	}
+	snapshot.UpdatedAt = now
 	if !snapshot.LastRunAt.IsZero() {
 		snapshot.LastRunAt = snapshot.LastRunAt.UTC()
 	}

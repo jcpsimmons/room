@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"time"
 
 	"github.com/jcpsimmons/room/internal/codex"
 	"github.com/jcpsimmons/room/internal/git"
+	"github.com/jcpsimmons/room/internal/state"
 	"github.com/jcpsimmons/room/internal/version"
 )
 
@@ -35,4 +37,19 @@ func NewService(deps Dependencies) *Service {
 		now:     now,
 		version: deps.Version,
 	}
+}
+
+func (s *Service) codexVersion(ctx context.Context, binary string) (string, error) {
+	versionText, err := s.runner.Version(ctx, binary)
+	if err != nil {
+		return "", err
+	}
+	if err := codex.ValidateVersion(versionText); err != nil {
+		return "", err
+	}
+	return versionText, nil
+}
+
+func (s *Service) saveState(path string, snapshot state.Snapshot) error {
+	return state.SaveAt(path, snapshot, s.now())
 }

@@ -35,6 +35,8 @@ func TestBuildIncludesRelevantContext(t *testing.T) {
 		"Improve config validation",
 		"room: tighten config errors",
 		"M internal/config/config.go",
+		"Do not repeat recent next instructions",
+		"Use status=done only when no materially useful improvement remains",
 		"Return only JSON",
 	} {
 		if !strings.Contains(body, want) {
