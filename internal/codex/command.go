@@ -3,27 +3,15 @@ package codex
 import (
 	"fmt"
 	"strings"
-	"time"
+
+	"github.com/jcpsimmons/room/internal/agent"
 )
 
-type Prompt struct {
-	Body string
-}
-
-type Schema struct {
-	Path string
-}
-
-type RunOptions struct {
-	Binary   string
-	WorkDir  string
-	Model    string
-	Sandbox  string
-	Approval string
-	Timeout  time.Duration
-}
+type Prompt = agent.Prompt
+type RunOptions = agent.RunOptions
 
 func BuildCommand(prompt Prompt, schema Schema, outputPath string, opts RunOptions) ([]string, error) {
+	_ = prompt
 	if strings.TrimSpace(opts.Binary) == "" {
 		return nil, fmt.Errorf("codex binary is required")
 	}

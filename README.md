@@ -1,8 +1,8 @@
 # ROOM
 
-ROOM is a standalone CLI for recursive repo improvement with Codex.
+ROOM is a standalone CLI for recursive repo improvement with Codex or Claude Code.
 
-It runs a cold-start loop against a git repository: build context from local state, ask Codex for one concrete improvement, validate the structured result, optionally commit it, generate the next instruction, and repeat. Think of it as a repeated resonance chamber for repo improvement, built as a sharp local operator tool rather than a platform.
+It runs a cold-start loop against a git repository: build context from local state, ask the selected agent for one concrete improvement, validate the structured result, optionally commit it, generate the next instruction, and repeat. Think of it as a repeated resonance chamber for repo improvement, built as a sharp local operator tool rather than a platform.
 
 ## Why
 
@@ -21,9 +21,9 @@ The original shell-script prototype worked until it didn’t. ROOM exists to mak
 ROOM assumes:
 
 - `git` is installed
-- `codex` is installed separately
-- Codex is already authenticated
-- Codex is new enough for ROOM's headless JSON workflow
+- either `codex` or `claude` is installed separately
+- the selected agent CLI is already authenticated
+- the selected agent CLI supports ROOM's headless JSON workflow
 - you are running inside a git repository
 
 Check the environment with:
@@ -106,6 +106,17 @@ room run --allow-dirty
 room run --json
 ```
 
+Provider selection is config-driven. ROOM defaults to Codex. To use Claude Code instead:
+
+```toml
+[agent]
+provider = "claude"
+
+[claude]
+binary = "claude"
+permission_mode = "bypassPermissions"
+```
+
 ## Commands
 
 ### `room init`
@@ -126,7 +137,7 @@ Runs the improvement loop. Each iteration:
 
 1. Reads config and local ROOM state.
 2. Builds a fresh prompt from the current instruction, recent summaries, prior next-instructions, git status, and recent commits.
-3. Calls `codex exec` headlessly.
+3. Calls the configured agent CLI headlessly.
 4. Requires JSON matching the ROOM schema.
 5. Stores prompt, execution metadata, stdout, stderr, result, and diff artifacts.
 6. Optionally commits the change with a consistent prefix.
@@ -145,14 +156,14 @@ Shows repo path, iteration count, current instruction, last summaries, recent RO
 Checks:
 
 - `git`
-- `codex`
-- Codex version support
-- Codex login status
+- selected provider binary
+- Codex version support or Claude CLI capability support
+- selected provider auth status
 - repo detection
 - config parsing
 - ROOM state directory health
 - write access
-- the expectation that Codex installation and auth are external
+- the expectation that provider installation and auth are external
 
 ### `room version`
 
@@ -180,11 +191,12 @@ ROOM stores all local orchestration state in `.room/`.
       diff.patch
 ```
 
-This is local state by design. It makes the loop inspectable, resumable, and debuggable without relying on Codex session resume.
+This is local state by design. It makes the loop inspectable, resumable, and debuggable without relying on provider session resume.
+ROOM ignores `.room/` in its own dirty checks, diffs, and auto-commits so local state does not contaminate repo improvement runs. If you also want plain `git status` to stay clean, add `.room/` to `.git/info/exclude` or `.gitignore`.
 
 ## How ROOM Decides What To Do Next
 
-ROOM owns the framing. Codex is asked for exactly one worthwhile improvement and must return:
+ROOM owns the framing. The selected agent is asked for exactly one worthwhile improvement and must return:
 
 ```json
 {
@@ -222,7 +234,7 @@ ROOM preserves raw artifacts so malformed JSON, timeouts, and git issues are dia
 ROOM is a power tool. Use it like one.
 
 - v1 is macOS and Linux first
-- ROOM does not manage Codex install or authentication
+- ROOM does not manage agent install or authentication
 - each iteration is a cold start by design
 - ROOM requires a clean repo unless `--allow-dirty` is set
 - failed iterations stop if they leave the repo in an unsafe dirty state

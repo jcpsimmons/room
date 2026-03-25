@@ -37,6 +37,8 @@ type DiffStats struct {
 
 type CLI struct{}
 
+var roomExcludedPathspec = []string{"--", ".", ":(exclude).room"}
+
 func NewClient() Client {
 	return CLI{}
 }
@@ -66,7 +68,7 @@ func (CLI) Root(ctx context.Context, dir string) (string, error) {
 }
 
 func (CLI) StatusShort(ctx context.Context, dir string) (string, error) {
-	return run(ctx, dir, "status", "--short")
+	return run(ctx, dir, withRoomExclusion("status", "--short")...)
 }
 
 func (c CLI) IsDirty(ctx context.Context, dir string) (bool, error) {
@@ -75,11 +77,11 @@ func (c CLI) IsDirty(ctx context.Context, dir string) (bool, error) {
 }
 
 func (CLI) Diff(ctx context.Context, dir string) (string, error) {
-	return run(ctx, dir, "diff", "--binary")
+	return run(ctx, dir, withRoomExclusion("diff", "--binary")...)
 }
 
 func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
-	out, err := run(ctx, dir, "diff", "--numstat")
+	out, err := run(ctx, dir, withRoomExclusion("diff", "--numstat")...)
 	if err != nil {
 		return DiffStats{}, err
 	}
@@ -102,7 +104,7 @@ func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
 }
 
 func (CLI) CommitAll(ctx context.Context, dir, message string) (string, error) {
-	if _, err := run(ctx, dir, "add", "-A"); err != nil {
+	if _, err := run(ctx, dir, withRoomExclusion("add", "-A")...); err != nil {
 		return "", err
 	}
 	if _, err := run(ctx, dir, "commit", "-m", message); err != nil {
@@ -178,6 +180,10 @@ func parseCommits(raw string) []Commit {
 		commits = append(commits, Commit{Hash: strings.TrimSpace(parts[0]), Subject: strings.TrimSpace(parts[1])})
 	}
 	return commits
+}
+
+func withRoomExclusion(args ...string) []string {
+	return append(append([]string{}, args...), roomExcludedPathspec...)
 }
 
 func run(ctx context.Context, dir string, args ...string) (string, error) {

@@ -7,9 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/jcpsimmons/room/internal/codex"
+	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/git"
@@ -39,6 +38,7 @@ type RunOptions struct {
 
 type RunReport struct {
 	RepoRoot            string   `json:"repo_root"`
+	Provider            string   `json:"provider"`
 	RequestedIterations int      `json:"requested_iterations"`
 	CompletedIterations int      `json:"completed_iterations"`
 	Failures            int      `json:"failures"`
@@ -97,14 +97,21 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		return RunReport{}, errors.New("repository is dirty; re-run with --allow-dirty to override")
 	}
 
-	codexVersion, err := s.codexVersion(ctx, cfg.Codex.Binary)
+	provider, providerVersion, err := s.agentVersion(ctx, cfg)
 	if err != nil {
 		return RunReport{}, err
 	}
-	snapshot.LastCodexVersion = codexVersion
+	snapshot.LastProvider = provider
+	snapshot.LastProviderVersion = providerVersion
+
+	runner, err := s.runnerForProvider(provider)
+	if err != nil {
+		return RunReport{}, err
+	}
 
 	lines := []string{
 		fmt.Sprintf("ROOM run in %s", repoRoot),
+		fmt.Sprintf("Provider: %s", agent.DisplayName(provider)),
 		fmt.Sprintf("Iterations requested: %d", opts.Iterations),
 		fmt.Sprintf("Commit mode: %t", commitEnabled),
 	}
@@ -120,6 +127,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 			}
 			return RunReport{
 				RepoRoot:            repoRoot,
+				Provider:            provider,
 				RequestedIterations: opts.Iterations,
 				CompletedIterations: completed,
 				Failures:            failures,
@@ -188,14 +196,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		resultPath := filepath.Join(runDir, "result.json")
 		executionPath := filepath.Join(runDir, "execution.json")
 		startedAt := s.now()
-		execution, runErr := s.runner.Run(ctx, codex.Prompt{Body: promptBody}, codex.Schema{Path: paths.SchemaPath}, codex.RunOptions{
-			Binary:   cfg.Codex.Binary,
-			WorkDir:  repoRoot,
-			Model:    cfg.Codex.Model,
-			Sandbox:  cfg.Codex.Sandbox,
-			Approval: cfg.Codex.Approval,
-			Timeout:  time.Duration(cfg.Codex.TimeoutSeconds) * time.Second,
-		}, resultPath)
+		execution, runErr := runner.Run(ctx, agent.Prompt{Body: promptBody}, agent.Schema{Path: paths.SchemaPath}, s.runOptionsForProvider(cfg, repoRoot), resultPath)
 		finishedAt := s.now()
 
 		if err := fsutil.AtomicWriteFile(filepath.Join(runDir, "stdout.log"), []byte(execution.Stdout), 0o644); err != nil {
@@ -204,7 +205,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 		if err := fsutil.AtomicWriteFile(filepath.Join(runDir, "stderr.log"), []byte(execution.Stderr), 0o644); err != nil {
 			return RunReport{}, err
 		}
-		if err := writeExecutionArtifact(executionPath, execution, startedAt, finishedAt, runErr); err != nil {
+		if err := writeExecutionArtifact(executionPath, provider, execution, startedAt, finishedAt, runErr); err != nil {
 			return RunReport{}, err
 		}
 
@@ -217,6 +218,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 			lines = append(lines, fmt.Sprintf("Iteration %d interrupted.", nextIteration))
 			return RunReport{
 				RepoRoot:            repoRoot,
+				Provider:            provider,
 				RequestedIterations: opts.Iterations,
 				CompletedIterations: completed,
 				Failures:            failures,
@@ -239,6 +241,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 				lines = append(lines, "Stopping because the repository is dirty after a failed iteration.")
 				return RunReport{
 					RepoRoot:            repoRoot,
+					Provider:            provider,
 					RequestedIterations: opts.Iterations,
 					CompletedIterations: completed,
 					Failures:            failures,
@@ -251,6 +254,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 				lines = append(lines, fmt.Sprintf("Stopping after %d failures.", failures))
 				return RunReport{
 					RepoRoot:            repoRoot,
+					Provider:            provider,
 					RequestedIterations: opts.Iterations,
 					CompletedIterations: completed,
 					Failures:            failures,
@@ -345,7 +349,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 
 		completed++
 		if statusValue == "done" {
-			lines = append(lines, "Codex reported done. Stopping.")
+			lines = append(lines, "Agent reported done. Stopping.")
 			break
 		}
 		if !opts.UntilDone && completed >= opts.Iterations {
@@ -355,6 +359,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (RunReport, error) {
 
 	return RunReport{
 		RepoRoot:            repoRoot,
+		Provider:            provider,
 		RequestedIterations: opts.Iterations,
 		CompletedIterations: completed,
 		Failures:            failures,
@@ -386,7 +391,7 @@ func (s *Service) loadConfig(ctx context.Context, repoRoot, override string) (co
 	}
 	paths := config.ResolvePaths(repoRoot, path, cfg)
 	if !fsutil.FileExists(paths.SchemaPath) {
-		if err := codex.WriteSchema(paths.SchemaPath); err != nil {
+		if err := agent.WriteSchema(paths.SchemaPath); err != nil {
 			return config.Config{}, config.Paths{}, err
 		}
 	}

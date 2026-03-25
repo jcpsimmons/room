@@ -21,7 +21,8 @@ type Snapshot struct {
 	LastCommitHash            string    `json:"last_commit_hash"`
 	CurrentInstructionHash    string    `json:"current_instruction_hash"`
 	RoomVersion               string    `json:"room_version"`
-	LastCodexVersion          string    `json:"last_codex_version"`
+	LastProvider              string    `json:"last_provider"`
+	LastProviderVersion       string    `json:"last_provider_version"`
 	ConsecutiveNoChange       int       `json:"consecutive_no_change"`
 	ConsecutiveTinyDiffs      int       `json:"consecutive_tiny_diffs"`
 	LastSummary               string    `json:"last_summary"`

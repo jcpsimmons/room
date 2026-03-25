@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/state"
 )
@@ -18,6 +19,7 @@ type StatusOptions struct {
 
 type StatusReport struct {
 	RepoRoot           string              `json:"repo_root"`
+	Provider           string              `json:"provider"`
 	State              state.Snapshot      `json:"state"`
 	CurrentInstruction string              `json:"current_instruction"`
 	RecentSummaries    []logs.SummaryEntry `json:"recent_summaries"`
@@ -66,6 +68,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 
 	lines := []string{
 		fmt.Sprintf("Repo: %s", repoRoot),
+		fmt.Sprintf("Provider: %s", agent.DisplayName(cfg.Agent.Provider)),
 		fmt.Sprintf("Iteration: %d", snapshot.CurrentIteration),
 		fmt.Sprintf("Last run: %s", formatTime(snapshot.LastRunAt)),
 		fmt.Sprintf("Last status: %s", snapshot.LastStatus),
@@ -88,6 +91,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 
 	return StatusReport{
 		RepoRoot:           repoRoot,
+		Provider:           agent.NormalizeProvider(cfg.Agent.Provider),
 		State:              snapshot,
 		CurrentInstruction: strings.TrimSpace(string(instruction)),
 		RecentSummaries:    summaries,

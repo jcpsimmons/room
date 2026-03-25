@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jcpsimmons/room/internal/codex"
+	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/git"
@@ -27,7 +28,7 @@ type fakeRunner struct {
 }
 
 type fakeRun struct {
-	result codex.Result
+	result agent.Result
 	stdout string
 	stderr string
 	err    error
@@ -37,9 +38,9 @@ func (f *fakeRunner) Version(_ context.Context, _ string) (string, error) {
 	return f.version, nil
 }
 
-func (f *fakeRunner) Run(_ context.Context, prompt codex.Prompt, _ codex.Schema, _ codex.RunOptions, outputPath string) (codex.Execution, error) {
+func (f *fakeRunner) Run(_ context.Context, prompt agent.Prompt, _ agent.Schema, _ agent.RunOptions, outputPath string) (agent.Execution, error) {
 	if f.calls >= len(f.runs) {
-		return codex.Execution{}, errors.New("unexpected run call")
+		return agent.Execution{}, errors.New("unexpected run call")
 	}
 	run := f.runs[f.calls]
 	f.prompts = append(f.prompts, prompt.Body)
@@ -48,14 +49,14 @@ func (f *fakeRunner) Run(_ context.Context, prompt codex.Prompt, _ codex.Schema,
 	if run.err == nil {
 		data, err := json.Marshal(run.result)
 		if err != nil {
-			return codex.Execution{}, err
+			return agent.Execution{}, err
 		}
 		if err := os.WriteFile(outputPath, append(data, '\n'), 0o644); err != nil {
-			return codex.Execution{}, err
+			return agent.Execution{}, err
 		}
 	}
 
-	return codex.Execution{
+	return agent.Execution{
 		Result:     run.result,
 		Stdout:     run.stdout,
 		Stderr:     run.stderr,
@@ -132,7 +133,7 @@ func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	runner := &fakeRunner{
 		version: "codex-cli 0.116.0",
 		runs: []fakeRun{{
-			result: codex.Result{
+			result: agent.Result{
 				Summary:         "Added parser guardrails",
 				NextInstruction: "Improve parser resilience",
 				Status:          "continue",
@@ -148,10 +149,10 @@ func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 		commitHashes: []string{"abc123"},
 	}
 	svc := NewService(Dependencies{
-		Git:     fakeGit,
-		Runner:  runner,
-		Now:     fixedClock(),
-		Version: version.Info{Version: "dev"},
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
 	})
 
 	report, err := svc.Run(context.Background(), RunOptions{
@@ -194,6 +195,9 @@ func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	if !strings.Contains(string(data), "\"duration_ms\": 1250") {
 		t.Fatalf("execution artifact missing duration: %s", string(data))
 	}
+	if !strings.Contains(string(data), "\"provider\": \"codex\"") {
+		t.Fatalf("execution artifact missing provider: %s", string(data))
+	}
 }
 
 func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
@@ -203,7 +207,7 @@ func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
 	runner := &fakeRunner{
 		version: "codex-cli 0.116.0",
 		runs: []fakeRun{{
-			result: codex.Result{
+			result: agent.Result{
 				Summary:         "Confirmed no materially useful work remains",
 				NextInstruction: "No materially useful work remains.",
 				Status:          "done",
@@ -217,10 +221,10 @@ func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
 		statsSeq: []git.DiffStats{{}},
 	}
 	svc := NewService(Dependencies{
-		Git:     fakeGit,
-		Runner:  runner,
-		Now:     fixedClock(),
-		Version: version.Info{Version: "dev"},
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
 	})
 
 	report, err := svc.Run(context.Background(), RunOptions{
@@ -264,10 +268,10 @@ func TestRunStopsAfterFailureThreshold(t *testing.T) {
 		dirtySeq: []bool{false, false},
 	}
 	svc := NewService(Dependencies{
-		Git:     fakeGit,
-		Runner:  runner,
-		Now:     fixedClock(),
-		Version: version.Info{Version: "dev"},
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
 	})
 
 	report, err := svc.Run(context.Background(), RunOptions{
@@ -295,7 +299,7 @@ func TestRunUsesConfigUntilDoneWhenFlagIsUnset(t *testing.T) {
 		version: "codex-cli 0.116.0",
 		runs: []fakeRun{
 			{
-				result: codex.Result{
+				result: agent.Result{
 					Summary:         "Added a reliability check",
 					NextInstruction: "Improve diagnostics around failures",
 					Status:          "continue",
@@ -303,7 +307,7 @@ func TestRunUsesConfigUntilDoneWhenFlagIsUnset(t *testing.T) {
 				},
 			},
 			{
-				result: codex.Result{
+				result: agent.Result{
 					Summary:         "Confirmed the loop is complete",
 					NextInstruction: "No materially useful work remains.",
 					Status:          "done",
@@ -320,10 +324,10 @@ func TestRunUsesConfigUntilDoneWhenFlagIsUnset(t *testing.T) {
 		commitHashes: []string{"abc123"},
 	}
 	svc := NewService(Dependencies{
-		Git:     fakeGit,
-		Runner:  runner,
-		Now:     fixedClock(),
-		Version: version.Info{Version: "dev"},
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
 	})
 
 	report, err := svc.Run(context.Background(), RunOptions{
@@ -340,6 +344,104 @@ func TestRunUsesConfigUntilDoneWhenFlagIsUnset(t *testing.T) {
 	}
 }
 
+func TestRunDryRunIgnoresRoomStateOnCleanRepo(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := initGitRepo(t)
+	writeRepoFile(t, filepath.Join(repoRoot, "README.md"), "hello\n")
+	runGit(t, repoRoot, "add", "README.md")
+	runGit(t, repoRoot, "commit", "-m", "init")
+
+	svc := NewService(Dependencies{
+		Git:       git.NewClient(),
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	if _, err := svc.Init(context.Background(), InitOptions{WorkingDir: repoRoot}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		DryRun:     true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+
+	status, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.Dirty {
+		t.Fatalf("expected ROOM state to be ignored by status")
+	}
+}
+
+func TestRunUsesClaudeProviderWhenConfigured(t *testing.T) {
+	repoRoot := t.TempDir()
+	cfg, paths := prepareInitializedRepo(t, repoRoot)
+	cfg.Agent.Provider = "claude"
+	cfg.Claude.Binary = "claude"
+	cfg.Claude.PermissionMode = "bypassPermissions"
+	if err := config.Save(paths.ConfigPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	claudeRunner := &fakeRunner{
+		version: "1.0.79",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Added Claude-specific diagnostics",
+				NextInstruction: "Improve failure summaries",
+				Status:          "continue",
+				CommitMessage:   "add diagnostics",
+			},
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/file b/file"},
+		statsSeq:     []git.DiffStats{{Files: 1, Added: 3, Deleted: 1}},
+		commitHashes: []string{"c1aude"},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(nil, claudeRunner),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.Provider != "claude" {
+		t.Fatalf("provider = %q", report.Provider)
+	}
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if snapshot.LastProvider != "claude" {
+		t.Fatalf("last provider = %q", snapshot.LastProvider)
+	}
+	if snapshot.LastProviderVersion != "1.0.79" {
+		t.Fatalf("last provider version = %q", snapshot.LastProviderVersion)
+	}
+}
+
 func prepareInitializedRepo(t *testing.T, repoRoot string) (config.Config, config.Paths) {
 	t.Helper()
 
@@ -353,7 +455,7 @@ func prepareInitializedRepo(t *testing.T, repoRoot string) (config.Config, confi
 	if err := config.Save(paths.ConfigPath, cfg); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	if err := codex.WriteSchema(paths.SchemaPath); err != nil {
+	if err := agent.WriteSchema(paths.SchemaPath); err != nil {
 		t.Fatalf("write schema: %v", err)
 	}
 	if err := os.WriteFile(paths.InstructionPath, []byte("Tighten parser reliability\n"), 0o644); err != nil {
@@ -378,4 +480,47 @@ func fixedClock() Clock {
 	return func() time.Time {
 		return time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	}
+}
+
+func testProviders(codexRunner, claudeRunner agent.Runner) map[string]agent.Runner {
+	providers := map[string]agent.Runner{}
+	if codexRunner != nil {
+		providers["codex"] = codexRunner
+	}
+	if claudeRunner != nil {
+		providers["claude"] = claudeRunner
+	}
+	return providers
+}
+
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+
+	repoRoot := t.TempDir()
+	runGit(t, repoRoot, "init")
+	runGit(t, repoRoot, "config", "user.name", "Test User")
+	runGit(t, repoRoot, "config", "user.email", "test@example.com")
+	return repoRoot
+}
+
+func writeRepoFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
 }

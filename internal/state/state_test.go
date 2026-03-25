@@ -20,7 +20,8 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 	snapshot.LastStatus = "continue"
 	snapshot.LastCommitHash = "abc123"
 	snapshot.CurrentInstructionHash = InstructionHash("ship it")
-	snapshot.LastCodexVersion = "codex-cli 0.116.0"
+	snapshot.LastProvider = "claude"
+	snapshot.LastProviderVersion = "1.2.3"
 	snapshot.LastRunAt = now.Add(time.Minute)
 	snapshot.LastSummary = "added tests"
 	snapshot.LastNextInstruction = "improve observability"
@@ -42,6 +43,9 @@ func TestSaveAndLoadSnapshot(t *testing.T) {
 	}
 	if loaded.LastSummary != snapshot.LastSummary {
 		t.Fatalf("last summary = %q", loaded.LastSummary)
+	}
+	if loaded.LastProvider != snapshot.LastProvider {
+		t.Fatalf("last provider = %q", loaded.LastProvider)
 	}
 }
 

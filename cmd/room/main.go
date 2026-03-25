@@ -11,7 +11,6 @@ import (
 	"syscall"
 
 	"github.com/jcpsimmons/room/internal/app"
-	"github.com/jcpsimmons/room/internal/codex"
 	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/version"
 	"github.com/spf13/cobra"
@@ -24,7 +23,6 @@ func main() {
 	info := version.Current()
 	svc := app.NewService(app.Dependencies{
 		Git:     git.NewClient(),
-		Runner:  codex.NewRunner(),
 		Version: info,
 	})
 
@@ -38,7 +36,7 @@ func main() {
 func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "room",
-		Short:         "ROOM is a repo-improvement orchestrator for Codex.",
+		Short:         "ROOM is a repo-improvement orchestrator for Codex and Claude Code.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -92,11 +90,11 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&opts.Iterations, "iterations", 0, "maximum iterations to run")
-	cmd.Flags().BoolVar(&opts.UntilDone, "until-done", false, "run until Codex reports done")
+	cmd.Flags().BoolVar(&opts.UntilDone, "until-done", false, "run until the selected agent reports done")
 	cmd.Flags().IntVar(&opts.MaxFailures, "max-failures", 0, "maximum failures before stopping")
 	cmd.Flags().BoolVar(&opts.NoCommit, "no-commit", false, "do not create git commits")
 	cmd.Flags().BoolVar(&opts.AllowDirty, "allow-dirty", false, "allow starting from a dirty repository")
-	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "build prompts and artifacts without executing Codex")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "build prompts and artifacts without executing the agent")
 	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "print more per-iteration detail")
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit machine-readable JSON")
 	cmd.Flags().StringVar(&opts.InstructionFile, "instruction-file", "", "override the instruction file path")
@@ -162,7 +160,7 @@ func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	var instructionFile string
 	cmd := &cobra.Command{
 		Use:   "inspect",
-		Short: "Show the prompt ROOM would send to Codex",
+		Short: "Show the prompt ROOM would send to the selected agent",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			report, err := svc.Inspect(ctx, app.InspectOptions{
 				WorkingDir:      mustWD(),

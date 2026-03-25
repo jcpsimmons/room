@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
+	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	toml "github.com/pelletier/go-toml/v2"
 )
@@ -20,10 +22,16 @@ const (
 )
 
 type Config struct {
+	Agent  AgentConfig  `toml:"agent" json:"agent"`
 	Run    RunConfig    `toml:"run" json:"run"`
 	Codex  CodexConfig  `toml:"codex" json:"codex"`
+	Claude ClaudeConfig `toml:"claude" json:"claude"`
 	Prompt PromptConfig `toml:"prompt" json:"prompt"`
 	Output OutputConfig `toml:"output" json:"output"`
+}
+
+type AgentConfig struct {
+	Provider string `toml:"provider" json:"provider"`
 }
 
 type RunConfig struct {
@@ -40,6 +48,13 @@ type CodexConfig struct {
 	Model          string `toml:"model" json:"model"`
 	Sandbox        string `toml:"sandbox" json:"sandbox"`
 	Approval       string `toml:"approval" json:"approval"`
+	TimeoutSeconds int    `toml:"timeout_seconds" json:"timeout_seconds"`
+}
+
+type ClaudeConfig struct {
+	Binary         string `toml:"binary" json:"binary"`
+	Model          string `toml:"model" json:"model"`
+	PermissionMode string `toml:"permission_mode" json:"permission_mode"`
 	TimeoutSeconds int    `toml:"timeout_seconds" json:"timeout_seconds"`
 }
 
@@ -69,6 +84,9 @@ type Paths struct {
 
 func Default() Config {
 	return Config{
+		Agent: AgentConfig{
+			Provider: agent.ProviderCodex,
+		},
 		Run: RunConfig{
 			DefaultIterations: 100,
 			MaxFailures:       3,
@@ -82,6 +100,12 @@ func Default() Config {
 			Model:          "",
 			Sandbox:        "danger-full-access",
 			Approval:       "never",
+			TimeoutSeconds: 1800,
+		},
+		Claude: ClaudeConfig{
+			Binary:         "claude",
+			Model:          "",
+			PermissionMode: "bypassPermissions",
 			TimeoutSeconds: 1800,
 		},
 		Prompt: PromptConfig{
@@ -109,11 +133,19 @@ func Load(path string) (Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
 	}
-	return cfg.Normalize(), nil
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 func Save(path string, cfg Config) error {
-	data, err := toml.Marshal(cfg.Normalize())
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	data, err := toml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
@@ -146,6 +178,7 @@ func (c Config) Normalize() Config {
 	cfg := c
 	def := Default()
 
+	cfg.Agent.Provider = agent.NormalizeProvider(cfg.Agent.Provider)
 	if cfg.Run.DefaultIterations <= 0 {
 		cfg.Run.DefaultIterations = def.Run.DefaultIterations
 	}
@@ -167,6 +200,15 @@ func (c Config) Normalize() Config {
 	if cfg.Codex.TimeoutSeconds <= 0 {
 		cfg.Codex.TimeoutSeconds = def.Codex.TimeoutSeconds
 	}
+	if strings.TrimSpace(cfg.Claude.Binary) == "" {
+		cfg.Claude.Binary = def.Claude.Binary
+	}
+	if strings.TrimSpace(cfg.Claude.PermissionMode) == "" {
+		cfg.Claude.PermissionMode = def.Claude.PermissionMode
+	}
+	if cfg.Claude.TimeoutSeconds <= 0 {
+		cfg.Claude.TimeoutSeconds = def.Claude.TimeoutSeconds
+	}
 	if strings.TrimSpace(cfg.Prompt.InstructionFile) == "" {
 		cfg.Prompt.InstructionFile = def.Prompt.InstructionFile
 	}
@@ -178,6 +220,16 @@ func (c Config) Normalize() Config {
 	}
 
 	return cfg
+}
+
+func (c Config) Validate() error {
+	if err := agent.ValidateProvider(c.Agent.Provider); err != nil {
+		return err
+	}
+	if agent.NormalizeProvider(c.Agent.Provider) == agent.ProviderClaude && strings.TrimSpace(c.Claude.PermissionMode) != "bypassPermissions" {
+		return fmt.Errorf("unsupported claude permission_mode %q; ROOM currently requires %q", strings.TrimSpace(c.Claude.PermissionMode), "bypassPermissions")
+	}
+	return nil
 }
 
 func resolve(base, path string) string {

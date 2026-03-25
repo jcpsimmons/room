@@ -1,20 +1,13 @@
 package codex
 
-import (
-	_ "embed"
+import "github.com/jcpsimmons/room/internal/agent"
 
-	"github.com/jcpsimmons/room/internal/fsutil"
-)
-
-//go:embed schema.json
-var defaultSchema []byte
+type Schema = agent.Schema
 
 func DefaultSchema() []byte {
-	out := make([]byte, len(defaultSchema))
-	copy(out, defaultSchema)
-	return out
+	return agent.DefaultSchema()
 }
 
 func WriteSchema(path string) error {
-	return fsutil.AtomicWriteFile(path, DefaultSchema(), 0o644)
+	return agent.WriteSchema(path)
 }

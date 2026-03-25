@@ -9,12 +9,11 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/jcpsimmons/room/internal/agent"
 )
 
-type Runner interface {
-	Run(ctx context.Context, prompt Prompt, schema Schema, opts RunOptions, outputPath string) (Execution, error)
-	Version(ctx context.Context, binary string) (string, error)
-}
+type Runner = agent.Runner
 
 type CLI struct{}
 

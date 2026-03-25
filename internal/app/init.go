@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jcpsimmons/room/internal/codex"
+	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/prompt"
@@ -50,7 +50,7 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		}
 	}
 	if !fsutil.FileExists(paths.SchemaPath) {
-		if err := codex.WriteSchema(paths.SchemaPath); err != nil {
+		if err := agent.WriteSchema(paths.SchemaPath); err != nil {
 			return InitReport{}, err
 		}
 	}
@@ -82,7 +82,8 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		"  room run --iterations 5",
 	}
 	if missingIgnore(repoRoot) {
-		lines = append(lines, "Recommendation: add `.room/` to `.gitignore` or `.git/info/exclude` if you do not want local ROOM state committed.")
+		lines = append(lines, "ROOM ignores `.room/` in its own dirty checks, diffs, and commits.")
+		lines = append(lines, "Recommendation: add `.room/` to `.git/info/exclude` or `.gitignore` if you also want plain `git status` to stay clean.")
 	}
 
 	return InitReport{

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/claude"
 	"github.com/jcpsimmons/room/internal/codex"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
@@ -68,29 +70,50 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		cfg = config.Default()
 	}
 
-	codexBinary := cfg.Codex.Binary
-	if strings.TrimSpace(codexBinary) == "" {
-		codexBinary = "codex"
-	}
-	if _, err := exec.LookPath(codexBinary); err != nil {
-		checks = append(checks, DoctorCheck{Name: "codex", OK: false, Message: fmt.Sprintf("Codex binary not found: %s", codexBinary)})
+	provider := agent.NormalizeProvider(cfg.Agent.Provider)
+	binary := s.binaryForProvider(cfg)
+	displayName := agent.DisplayName(provider)
+
+	runner, runnerErr := s.runnerForProvider(provider)
+	if runnerErr != nil {
+		checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: runnerErr.Error()})
 	} else {
-		versionText, versionErr := s.runner.Version(ctx, codexBinary)
-		if versionErr != nil {
-			checks = append(checks, DoctorCheck{Name: "codex", OK: false, Message: versionErr.Error()})
+		if _, err := exec.LookPath(binary); err != nil {
+			checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: fmt.Sprintf("%s binary not found: %s", displayName, binary)})
 		} else {
-			checks = append(checks, DoctorCheck{Name: "codex", OK: true, Message: fmt.Sprintf("Codex available: %s", versionText)})
-			if err := codex.ValidateVersion(versionText); err != nil {
-				checks = append(checks, DoctorCheck{Name: "codex_version", OK: false, Message: err.Error()})
+			versionText, versionErr := runner.Version(ctx, binary)
+			if versionErr != nil {
+				checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: versionErr.Error()})
 			} else {
-				checks = append(checks, DoctorCheck{Name: "codex_version", OK: true, Message: fmt.Sprintf("Codex version is supported (requires %s or newer)", codex.MinimumSupportedVersion())})
+				checks = append(checks, DoctorCheck{Name: "provider", OK: true, Message: fmt.Sprintf("%s available: %s", displayName, versionText)})
+				switch provider {
+				case agent.ProviderClaude:
+					if err := claude.ValidateCLI(ctx, binary); err != nil {
+						checks = append(checks, DoctorCheck{Name: "provider_capabilities", OK: false, Message: err.Error()})
+					} else {
+						checks = append(checks, DoctorCheck{Name: "provider_capabilities", OK: true, Message: "Claude Code CLI supports ROOM's required non-interactive flags"})
+					}
+				default:
+					if err := codex.ValidateVersion(versionText); err != nil {
+						checks = append(checks, DoctorCheck{Name: "provider_version", OK: false, Message: err.Error()})
+					} else {
+						checks = append(checks, DoctorCheck{Name: "provider_version", OK: true, Message: fmt.Sprintf("Codex version is supported (requires %s or newer)", codex.MinimumSupportedVersion())})
+					}
+				}
 			}
-		}
-		statusOut, statusErr := exec.CommandContext(ctx, codexBinary, "login", "status").CombinedOutput()
-		if statusErr != nil {
-			checks = append(checks, DoctorCheck{Name: "auth", OK: false, Message: "Codex login status failed; authenticate separately before running ROOM"})
-		} else {
-			checks = append(checks, DoctorCheck{Name: "auth", OK: true, Message: strings.TrimSpace(string(statusOut))})
+
+			authArgs := []string{"login", "status"}
+			authFailure := "login status failed; authenticate separately before running ROOM"
+			if provider == agent.ProviderClaude {
+				authArgs = []string{"auth", "status", "--text"}
+				authFailure = "auth status failed; authenticate separately before running ROOM"
+			}
+			statusOut, statusErr := exec.CommandContext(ctx, binary, authArgs...).CombinedOutput()
+			if statusErr != nil {
+				checks = append(checks, DoctorCheck{Name: "auth", OK: false, Message: fmt.Sprintf("%s %s", displayName, authFailure)})
+			} else {
+				checks = append(checks, DoctorCheck{Name: "auth", OK: true, Message: strings.TrimSpace(string(statusOut))})
+			}
 		}
 	}
 
@@ -130,7 +153,7 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	} else {
 		checks = append(checks, DoctorCheck{Name: "write", OK: true, Message: "ROOM can write to disk"})
 	}
-	checks = append(checks, DoctorCheck{Name: "expectation", OK: true, Message: "Codex must be installed and authenticated separately; ROOM does not manage installation or login"})
+	checks = append(checks, DoctorCheck{Name: "expectation", OK: true, Message: "The selected agent CLI must be installed and authenticated separately; ROOM does not manage installation or login"})
 
 	lines := []string{"ROOM doctor"}
 	for _, check := range checks {
