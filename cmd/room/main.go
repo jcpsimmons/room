@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/app"
 	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/ui"
@@ -83,16 +84,20 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			opts.VerboseSet = cmd.Flags().Changed("verbose")
 			opts.JSONSet = cmd.Flags().Changed("json")
 			if !opts.JSON && canStyleOutput() {
-				return runWithUI(ctx, svc, opts)
+				if shouldUseRunUI() {
+					return runWithUI(ctx, svc, opts)
+				}
+				return runWithLiveProgress(ctx, svc, opts)
+			}
+			if !opts.JSON {
+				report, err := svc.Run(ctx, opts)
+				if err != nil {
+					return err
+				}
+				return renderLines(report.Lines)
 			}
 			report, err := svc.Run(ctx, opts)
-			if opts.JSON {
-				return printJSON(report, err)
-			}
-			if err != nil {
-				return err
-			}
-			return renderLines(report.Lines)
+			return printJSON(report, err)
 		},
 	}
 	cmd.Flags().IntVar(&opts.Iterations, "iterations", 0, "maximum iterations to run")
@@ -234,6 +239,64 @@ func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error
 		return errors.Join(result.err, renderErr, uiErr)
 	}
 	return errors.Join(result.err, renderErr)
+}
+
+func runWithLiveProgress(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
+	opts.Progress = func(event app.RunProgressEvent) {
+		for _, line := range formatRunProgress(event) {
+			_, _ = fmt.Fprintln(os.Stdout, line)
+		}
+	}
+
+	report, err := svc.Run(ctx, opts)
+	renderErr := renderRun(report)
+	return errors.Join(err, renderErr)
+}
+
+func formatRunProgress(event app.RunProgressEvent) []string {
+	switch event.Phase {
+	case app.RunProgressPhaseRunStart:
+		return []string{
+			fmt.Sprintf("ROOM run in %s", event.RepoRoot),
+			fmt.Sprintf("Provider: %s", agent.DisplayName(event.Provider)),
+			fmt.Sprintf("Iterations requested: %d", event.RequestedIterations),
+			fmt.Sprintf("Commit mode: %t", event.CommitEnabled),
+		}
+	case app.RunProgressPhaseIterationStart:
+		return []string{fmt.Sprintf("Starting iteration %d...", event.Iteration)}
+	case app.RunProgressPhaseAgentExecutionStart:
+		return []string{fmt.Sprintf("Executing iteration %d with %s...", event.Iteration, agent.DisplayName(event.Provider))}
+	case app.RunProgressPhaseIterationSuccess:
+		if event.DryRun {
+			return []string{fmt.Sprintf("Dry run prepared prompt for iteration %d at %s", event.Iteration, event.PromptPath)}
+		}
+		detail := strings.TrimSpace(event.Summary)
+		if detail == "" {
+			detail = "iteration completed cleanly"
+		}
+		return []string{fmt.Sprintf("Iteration %d [%s]: %s", event.Iteration, event.Status, detail)}
+	case app.RunProgressPhaseIterationFailure:
+		return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, errorText(event.Err, "agent execution failed"))}
+	case app.RunProgressPhaseRunFinish:
+		if event.Err != nil {
+			return []string{fmt.Sprintf("Run halted: %s", event.Err.Error())}
+		}
+		if event.Status == "done" {
+			return []string{"Agent reported done. Stopping."}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func shouldUseRunUI() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ROOM_TUI"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {

@@ -118,6 +118,11 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	if strings.TrimSpace(opts.CommitPrefix) != "" {
 		commitPrefix = opts.CommitPrefix
 	}
+	report = RunReport{
+		RepoRoot:            repoRoot,
+		Provider:            agent.NormalizeProvider(cfg.Agent.Provider),
+		RequestedIterations: opts.Iterations,
+	}
 	progress := opts.Progress
 	defer func() {
 		emitRunProgress(progress, RunProgressEvent{
@@ -134,6 +139,13 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			Err:                 err,
 		})
 	}()
+	emitRunProgress(progress, RunProgressEvent{
+		Phase:               RunProgressPhaseRunStart,
+		RepoRoot:            repoRoot,
+		Provider:            report.Provider,
+		RequestedIterations: opts.Iterations,
+		CommitEnabled:       commitEnabled,
+	})
 
 	snapshot, err := state.Load(paths.StatePath)
 	if err != nil {
@@ -159,20 +171,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	if err != nil {
 		return RunReport{}, err
 	}
-
-	report = RunReport{
-		RepoRoot:            repoRoot,
-		Provider:            provider,
-		RequestedIterations: opts.Iterations,
-	}
-
-	emitRunProgress(progress, RunProgressEvent{
-		Phase:               RunProgressPhaseRunStart,
-		RepoRoot:            repoRoot,
-		Provider:            provider,
-		RequestedIterations: opts.Iterations,
-		CommitEnabled:       commitEnabled,
-	})
+	report.Provider = provider
 
 	lines := []string{
 		fmt.Sprintf("ROOM run in %s", repoRoot),
