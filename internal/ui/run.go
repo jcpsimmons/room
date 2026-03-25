@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/harmonica"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type ProgressKind string
@@ -193,54 +194,74 @@ func (m RunModel) View() string {
 	if innerWidth < 80 {
 		innerWidth = 80
 	}
-
-	leftWidth := innerWidth / 2
-	if leftWidth < 36 {
-		leftWidth = 36
-	}
-	rightWidth := innerWidth - leftWidth - 2
-	if rightWidth < 30 {
-		rightWidth = 30
+	innerHeight := m.height
+	if innerHeight < 24 {
+		innerHeight = 24
 	}
 
-	left := strings.Join([]string{
-		rainbow(strings.ToUpper(m.title)),
-		subtitleStyle().Render(m.subtitle),
-		"",
-		kvLine("status", string(m.status), accentPink),
-		kvLine("progress", fmt.Sprintf("%d/%d", m.completed, m.total), accentCyan),
-		kvLine("failures", fmt.Sprintf("%d", m.failures), accentGold),
-		"",
-		m.spin.View() + " " + subtitleStyle().Render(m.headline),
-		"",
-		m.bar.ViewAs(m.progressValue()),
-		"",
-		subtitleStyle().Render(m.detail),
-	}, "\n")
+	gapWidth := 1
+	leftWidth := int(math.Round(float64(innerWidth) * 0.56))
+	if leftWidth < 38 {
+		leftWidth = 38
+	}
+	rightWidth := innerWidth - leftWidth - gapWidth
+	if rightWidth < 34 {
+		rightWidth = 34
+		leftWidth = innerWidth - rightWidth - gapWidth
+	}
+	if leftWidth < 38 {
+		leftWidth = 38
+		rightWidth = innerWidth - leftWidth - gapWidth
+	}
 
-	right := strings.Join([]string{
-		m.renderPhysicsPanel(rightWidth),
-		"",
-		m.renderEventStream(),
-	}, "\n")
+	headerHeight := 5
+	footerHeight := 3
+	mainHeight := innerHeight - headerHeight - footerHeight - 2
+	if mainHeight < 14 {
+		mainHeight = 14
+	}
+	rightTopHeight := mainHeight / 2
+	if rightTopHeight < 8 {
+		rightTopHeight = 8
+	}
+	rightBottomHeight := mainHeight - rightTopHeight - 1
+	if rightBottomHeight < 6 {
+		rightBottomHeight = 6
+		rightTopHeight = mainHeight - rightBottomHeight - 1
+	}
 
-	frame := lipglossJoinHorizontal(
-		neonPanel(accentCyan).Width(leftWidth).Render(left),
-		neonPanel(accentPink).Width(rightWidth).Render(right),
+	header := m.renderHeader(innerWidth, headerHeight)
+	left := m.renderStatusPanel(leftWidth, mainHeight)
+	right := lipglossJoinVertical(
+		m.renderPhysicsPanel(rightWidth, rightTopHeight),
+		m.renderEventStream(rightWidth, rightBottomHeight),
 	)
 
-	footer := framed("HINTS", strings.Join([]string{
+	frame := lipglossJoinHorizontal(
+		left,
+		spacer(gapWidth),
+		right,
+	)
+
+	footer := renderPanel("HINTS", strings.Join([]string{
 		statusBadge(string(m.status)),
 		subtitleStyle().Render("ctrl+c stops the run"),
-	}, "  "), accentViolet)
+	}, "  "), accentViolet, innerWidth, footerHeight)
 
-	return lipglossJoinVertical(
-		framed("ROOM LIVE", strings.Join([]string{
-			rainbow("NEON ITERATION ENGINE"),
-			subtitleStyle().Render(fmt.Sprintf("running for %s", time.Since(m.started).Round(time.Millisecond))),
-		}, "\n"), accentCyan),
+	content := lipglossJoinVertical(
+		header,
 		frame,
 		footer,
+	)
+
+	return lipgloss.Place(
+		innerWidth,
+		innerHeight,
+		lipgloss.Left,
+		lipgloss.Top,
+		content,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceBackground(bgColor),
 	)
 }
 
@@ -339,7 +360,57 @@ func (m RunModel) targetPoint() (float64, float64) {
 	return x, y
 }
 
-func (m RunModel) renderPhysicsPanel(width int) string {
+func (m RunModel) renderHeader(width, height int) string {
+	body := strings.Join([]string{
+		rainbow("NEON ITERATION ENGINE"),
+		subtitleStyle().Render("orchestrating repo improvement in real time"),
+		strings.Join([]string{
+			kvLine("status", string(m.status), accentPink),
+			kvLine("progress", fmt.Sprintf("%d/%d", m.completed, maxInt(m.total, 1)), accentCyan),
+			kvLine("elapsed", time.Since(m.started).Round(time.Millisecond).String(), accentGold),
+		}, "  "),
+	}, "\n")
+	return renderPanel("ROOM LIVE", body, accentCyan, width, height)
+}
+
+func (m RunModel) renderStatusPanel(width, height int) string {
+	panelStyle := neonPanel(accentCyan)
+	contentWidth := width - panelStyle.GetHorizontalFrameSize()
+	if contentWidth < 12 {
+		contentWidth = 12
+	}
+
+	bar := m.bar
+	bar.Width = contentWidth
+
+	body := strings.Join([]string{
+		rainbow(strings.ToUpper(m.title)),
+		subtitleStyle().Render(m.subtitle),
+		"",
+		m.spin.View() + " " + titleStyle().Render(m.headline),
+		lipgloss.NewStyle().Width(contentWidth).Render(m.detail),
+		"",
+		bar.ViewAs(m.progressValue()),
+		"",
+		strings.Join([]string{
+			kvLine("failures", fmt.Sprintf("%d", m.failures), accentGold),
+			kvLine("iteration", fmt.Sprintf("%d", maxInt(m.completed, m.eventIteration())), accentViolet),
+		}, "  "),
+	}, "\n")
+
+	return renderPanel("RUN", body, accentCyan, width, height)
+}
+
+func (m RunModel) eventIteration() int {
+	for i := len(m.events) - 1; i >= 0; i-- {
+		if m.events[i].Iteration > 0 {
+			return m.events[i].Iteration
+		}
+	}
+	return 0
+}
+
+func (m RunModel) renderPhysicsPanel(width, height int) string {
 	const gridW = 22
 	const gridH = 9
 
@@ -400,15 +471,12 @@ func (m RunModel) renderPhysicsPanel(width int) string {
 		b.String(),
 	}, "\n")
 
-	if width < 36 {
-		width = 36
-	}
-	return neonPanel(accentPink).Width(width).Render(body)
+	return renderPanel("ENGINE", body, accentPink, width, height)
 }
 
-func (m RunModel) renderEventStream() string {
+func (m RunModel) renderEventStream(width, height int) string {
 	if len(m.events) == 0 {
-		return framed("EVENTS", subtitleStyle().Render("waiting for progress messages"), accentOrange)
+		return renderPanel("EVENTS", subtitleStyle().Render("waiting for progress messages"), accentOrange, width, height)
 	}
 	var lines []string
 	for i := len(m.events) - 1; i >= 0 && len(lines) < 6; i-- {
@@ -422,11 +490,63 @@ func (m RunModel) renderEventStream() string {
 			lines = append(lines, "  "+subtitleStyle().Render(ev.Detail))
 		}
 	}
-	return framed("EVENTS", strings.Join(lines, "\n"), accentOrange)
+	return renderPanel("EVENTS", strings.Join(lines, "\n"), accentOrange, width, height)
 }
 
 func (m RunModel) frameCmd() tea.Cmd {
 	return tea.Tick(33*time.Millisecond, func(t time.Time) tea.Msg {
 		return frameMsg(t)
 	})
+}
+
+func renderPanel(title, body string, accent lipgloss.Color, width, height int) string {
+	style := neonPanel(accent)
+	outerWidth := width - style.GetBorderLeftSize() - style.GetBorderRightSize()
+	if outerWidth < 1 {
+		outerWidth = 1
+	}
+	outerHeight := height - style.GetBorderTopSize() - style.GetBorderBottomSize()
+	if outerHeight < 1 {
+		outerHeight = 1
+	}
+	bodyWidth := width - style.GetHorizontalFrameSize()
+	if bodyWidth < 1 {
+		bodyWidth = 1
+	}
+	bodyHeight := height - style.GetVerticalFrameSize()
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+
+	head := accentBadge(textColor, accent).Render(" " + title + " ")
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		head,
+		"",
+		body,
+	)
+
+	return style.
+		Width(outerWidth).
+		Height(outerHeight).
+		Render(
+			lipgloss.NewStyle().
+				Width(bodyWidth).
+				MaxHeight(bodyHeight).
+				Render(content),
+		)
+}
+
+func spacer(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().Width(width).Render("")
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
