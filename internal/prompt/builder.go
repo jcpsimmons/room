@@ -35,14 +35,14 @@ func Build(input BuildInput) string {
 	b.WriteString("- Use status=continue when the next instruction should stay on a productive trajectory.\n")
 	b.WriteString("- Use status=pivot when this angle is exhausted but other useful work remains.\n")
 	b.WriteString("- Use status=done only when no materially useful improvement remains.\n\n")
-	b.WriteString(fmt.Sprintf("Repository path: %s\n\n", input.RepoPath))
+	fmt.Fprintf(&b, "Repository path: %s\n\n", input.RepoPath)
 
 	b.WriteString("Recent summaries:\n")
 	if len(input.RecentSummaries) == 0 {
 		b.WriteString("- none\n")
 	} else {
 		for _, summary := range input.RecentSummaries {
-			b.WriteString(fmt.Sprintf("- #%d [%s] %s\n", summary.Iteration, summary.Status, summary.Summary))
+			fmt.Fprintf(&b, "- #%d [%s] %s\n", summary.Iteration, summary.Status, summary.Summary)
 		}
 	}
 	b.WriteString("\nPrior next-instructions:\n")
@@ -60,7 +60,7 @@ func Build(input BuildInput) string {
 		b.WriteString("- none\n")
 	} else {
 		for _, commit := range input.RecentCommits {
-			b.WriteString(fmt.Sprintf("- %s %s\n", commit.Hash, commit.Subject))
+			fmt.Fprintf(&b, "- %s %s\n", commit.Hash, commit.Subject)
 		}
 	}
 	b.WriteString("\nCurrent git status:\n")

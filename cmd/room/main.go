@@ -28,7 +28,7 @@ func main() {
 
 	root := newRootCommand(ctx, svc, info)
 	if err := root.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
@@ -60,8 +60,7 @@ func newInitCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			renderLines(report.Lines)
-			return nil
+			return renderLines(report.Lines)
 		},
 	}
 	return cmd
@@ -85,8 +84,7 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			renderLines(report.Lines)
-			return nil
+			return renderLines(report.Lines)
 		},
 	}
 	cmd.Flags().IntVar(&opts.Iterations, "iterations", 0, "maximum iterations to run")
@@ -120,8 +118,7 @@ func newStatusCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			renderLines(report.Lines)
-			return nil
+			return renderLines(report.Lines)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
@@ -146,8 +143,7 @@ func newDoctorCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			renderLines(report.Lines)
-			return nil
+			return renderLines(report.Lines)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
@@ -170,8 +166,8 @@ func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stdout, report.Prompt)
-			return nil
+			_, err = fmt.Fprintln(os.Stdout, report.Prompt)
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
@@ -184,16 +180,19 @@ func newVersionCommand(info version.Info) *cobra.Command {
 		Use:   "version",
 		Short: "Show build version information",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintln(os.Stdout, info.String())
-			return nil
+			_, err := fmt.Fprintln(os.Stdout, info.String())
+			return err
 		},
 	}
 }
 
-func renderLines(lines []string) {
+func renderLines(lines []string) error {
 	for _, line := range lines {
-		fmt.Fprintln(os.Stdout, line)
+		if _, err := fmt.Fprintln(os.Stdout, line); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func printJSON(v any, err error) error {
@@ -208,8 +207,8 @@ func printJSON(v any, err error) error {
 	if marshalErr != nil {
 		return errors.Join(err, marshalErr)
 	}
-	fmt.Fprintln(os.Stdout, string(data))
-	return err
+	_, writeErr := fmt.Fprintln(os.Stdout, string(data))
+	return errors.Join(err, writeErr)
 }
 
 func mustWD() string {

@@ -24,7 +24,7 @@ func ValidateHelp(text string) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("Claude Code CLI is missing required flags: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("claude code CLI is missing required flags: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package logs
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,7 @@ type SummaryEntry struct {
 	LinesDeleted int       `json:"lines_deleted"`
 }
 
-func AppendSummary(path string, entry SummaryEntry) error {
+func AppendSummary(path string, entry SummaryEntry) (err error) {
 	if err := fsutil.EnsureDir(filepath.Dir(path)); err != nil {
 		return err
 	}
@@ -30,7 +31,9 @@ func AppendSummary(path string, entry SummaryEntry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
 
 	entry.Timestamp = entry.Timestamp.UTC()
 	data, err := json.Marshal(entry)
@@ -43,7 +46,7 @@ func AppendSummary(path string, entry SummaryEntry) error {
 	return nil
 }
 
-func ReadRecentSummaries(path string, limit int) ([]SummaryEntry, error) {
+func ReadRecentSummaries(path string, limit int) (entries []SummaryEntry, err error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -54,9 +57,10 @@ func ReadRecentSummaries(path string, limit int) ([]SummaryEntry, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
 
-	var entries []SummaryEntry
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -78,7 +82,7 @@ func ReadRecentSummaries(path string, limit int) ([]SummaryEntry, error) {
 	return entries[len(entries)-limit:], nil
 }
 
-func AppendSeenInstruction(path, instruction string) error {
+func AppendSeenInstruction(path, instruction string) (err error) {
 	if err := fsutil.EnsureDir(filepath.Dir(path)); err != nil {
 		return err
 	}
@@ -86,7 +90,9 @@ func AppendSeenInstruction(path, instruction string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
 
 	trimmed := strings.TrimSpace(instruction)
 	if trimmed == "" {
@@ -96,7 +102,7 @@ func AppendSeenInstruction(path, instruction string) error {
 	return err
 }
 
-func ReadSeenInstructions(path string, limit int) ([]string, error) {
+func ReadSeenInstructions(path string, limit int) (values []string, err error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -107,9 +113,10 @@ func ReadSeenInstructions(path string, limit int) ([]string, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
 
-	var values []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
