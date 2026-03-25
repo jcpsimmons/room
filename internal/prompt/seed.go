@@ -1,0 +1,18 @@
+package prompt
+
+func DefaultSeedInstruction() string {
+	return `Make this repository materially better. Apply exactly one worthwhile improvement in this iteration.
+
+Priorities:
+- prefer bugs, reliability, tests, typing, maintainability, performance, diagnostics, and useful docs
+- do not stop at analysis; make the change
+- validate the change if practical
+- avoid cosmetic churn and low-value refactors
+- if the current angle is exhausted, expand the search space to another subsystem or concern
+- if conventional ideas are exhausted, choose a creative but still concrete improvement
+- use status=done only when no materially useful improvement remains
+- use status=pivot when this direction is exhausted but the repository still has worthwhile work left
+- do not ask questions
+
+Return only JSON matching the required schema.`
+}

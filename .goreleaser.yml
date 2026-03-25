@@ -1,0 +1,39 @@
+version: 2
+
+project_name: room
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: room
+    main: ./cmd/room
+    binary: room
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/jcpsimmons/room/internal/version.buildVersion={{.Version}} -X github.com/jcpsimmons/room/internal/version.buildCommit={{.Commit}} -X github.com/jcpsimmons/room/internal/version.buildDate={{.Date}}
+
+archives:
+  - id: room
+    builds:
+      - room
+    formats:
+      - tar.gz
+    name_template: room_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: git

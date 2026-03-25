@@ -1,0 +1,18 @@
+{
+  "current_iteration": 0,
+  "total_successful_iterations": 0,
+  "total_failures": 0,
+  "last_status": "idle",
+  "created_at": "2026-03-25T00:00:00Z",
+  "updated_at": "2026-03-25T00:00:00Z",
+  "last_run_at": "0001-01-01T00:00:00Z",
+  "last_commit_hash": "",
+  "current_instruction_hash": "",
+  "room_version": "dev",
+  "last_codex_version": "",
+  "consecutive_no_change": 0,
+  "consecutive_tiny_diffs": 0,
+  "last_summary": "",
+  "last_next_instruction": "",
+  "last_run_directory": ""
+}
