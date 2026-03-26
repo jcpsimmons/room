@@ -14,7 +14,7 @@ var (
 	textColor = lipgloss.Color("#E8D5C4")
 	dimColor     = lipgloss.Color("#8B6F5E")
 	accentCyan   = lipgloss.Color("#C4956A") // warm amber (patch cable)
-	accentPink   = lipgloss.Color("#D43B2E") // buchla red
+	accentPink   = lipgloss.Color("#D43B2E") // oxide red
 	accentLime   = lipgloss.Color("#C89B3C") // oxidized brass
 	accentGold   = lipgloss.Color("#E8A435") // hot filament
 	accentOrange = lipgloss.Color("#B85C2E") // burnt sienna

@@ -121,6 +121,11 @@ type RunModel struct {
 	// Spark particles launched on status changes.
 	sparks []spark
 
+	// Generative visualizations.
+	decay     decayChamber
+	resonance resonanceField
+	flux      fluxTopology
+
 	// Audio synthesis.
 	synth *audio.Synth
 
@@ -168,6 +173,9 @@ func NewRunModel(total int, opts ...RunOption) RunModel {
 		orbX:      10,
 		orbY:      4,
 		trail:     []trailPoint{{X: 10, Y: 4}},
+		decay:     newDecayChamber(20, 7),
+		resonance: newResonanceField(20, 5),
+		flux:      newFluxTopology(20, 7),
 		width:     100,
 		height:    30,
 		lastFrame: now,
@@ -276,26 +284,43 @@ func (m RunModel) View() string {
 		mainHeight = 14
 	}
 
-	// Split right column into three: ENGINE (physics), CONFIG, EVENTS.
-	engineHeight := 14
-	if engineHeight > mainHeight/2 {
-		engineHeight = mainHeight / 2
+	// Left column: OSCILLATOR + DECAY CHAMBER.
+	statusHeight := mainHeight * 2 / 5
+	if statusHeight < 10 {
+		statusHeight = 10
 	}
-	if engineHeight < 10 {
-		engineHeight = 10
+	decayHeight := mainHeight - statusHeight
+	if decayHeight < 8 {
+		decayHeight = 8
+		statusHeight = mainHeight - decayHeight
 	}
-	configHeight := 8
-	eventsHeight := mainHeight - engineHeight - configHeight
-	if eventsHeight < 5 {
-		eventsHeight = 5
-		configHeight = mainHeight - engineHeight - eventsHeight
+
+	// Right column: SCOPE + RESONANCE + FLUX + EVENTS.
+	scopeHeight := 14
+	if scopeHeight > mainHeight/3 {
+		scopeHeight = mainHeight / 3
+	}
+	if scopeHeight < 10 {
+		scopeHeight = 10
+	}
+	vizHeight := (mainHeight - scopeHeight) / 3
+	if vizHeight < 5 {
+		vizHeight = 5
+	}
+	eventsHeight := mainHeight - scopeHeight - vizHeight*2
+	if eventsHeight < 4 {
+		eventsHeight = 4
 	}
 
 	header := m.renderHeader(innerWidth, headerHeight)
-	left := m.renderStatusPanel(leftWidth, mainHeight)
+	left := lipglossJoinVertical(
+		m.renderStatusPanel(leftWidth, statusHeight),
+		m.renderDecayPanel(leftWidth, decayHeight),
+	)
 	right := lipglossJoinVertical(
-		m.renderPhysicsPanel(rightWidth, engineHeight),
-		m.renderParamsPanel(rightWidth, configHeight),
+		m.renderPhysicsPanel(rightWidth, scopeHeight),
+		m.renderResonancePanel(rightWidth, vizHeight),
+		m.renderFluxPanel(rightWidth, vizHeight),
 		m.renderEventStream(rightWidth, eventsHeight),
 	)
 
@@ -442,6 +467,11 @@ func (m RunModel) stepFrame(now time.Time) RunModel {
 	}
 	m.sparks = alive
 
+	// Step generative visualizations.
+	m.decay.step(dt)
+	m.resonance.step(dt)
+	m.flux.step(dt)
+
 	// Drive the synth from the orbit state.
 	if m.synth != nil {
 		speed := math.Sqrt(m.orbVX*m.orbVX + m.orbVY*m.orbVY)
@@ -451,17 +481,26 @@ func (m RunModel) stepFrame(now time.Time) RunModel {
 		amp := math.Min(speed*0.15, 0.7)
 		// Y position → FM modulation depth: deeper at edges.
 		modDepth := math.Abs(m.orbY-4.5) * 0.8
-		// Modulator at a fifth above fundamental for metallic Buchla timbre.
+		// Modulator at a fifth above fundamental for metallic FM timbre.
 		modFreq := freq * 1.5
 		// Slight detune for beating.
 		detune := 0.5 + math.Sin(m.phase*0.3)*0.3
-		m.synth.Update(audio.Params{
+		m.synth.UpdateVoice(0, audio.Params{
 			Freq:     freq,
 			Amp:      amp,
 			ModFreq:  modFreq,
 			ModDepth: modDepth,
 			Detune:   detune,
 		})
+
+		// Voice 1: Decay chamber — sub-bass rumble + decay pings.
+		m.synth.UpdateVoice(1, m.decay.audioParams())
+
+		// Voice 2: Resonance — crystalline beating tones.
+		m.synth.UpdateVoice(2, m.resonance.audioParams())
+
+		// Voice 3: Flux — filtered noise texture.
+		m.synth.UpdateVoice(3, m.flux.audioParams())
 	}
 
 	return m
@@ -512,7 +551,7 @@ func (m RunModel) renderHeader(width, height int) string {
 	// Fake a drifting voltage reading from phase.
 	voltage := 3.3 + math.Sin(m.phase*0.9)*1.7 + math.Sin(m.phase*2.3)*0.4
 	body := strings.Join([]string{
-		titleStyle().Render("BUCHLA SERIES 100 SEQUENCER"),
+		titleStyle().Render("SERIES 100 SEQUENCER"),
 		subtitleStyle().Render("san francisco, ca"),
 		strings.Join([]string{
 			kvLine("gate", string(m.status), accentPink),
@@ -536,10 +575,7 @@ func (m RunModel) renderStatusPanel(width, height int) string {
 
 	// Oscillating resonance meter.
 	resonance := math.Abs(math.Sin(m.phase*1.7)) * 100
-	body := strings.Join([]string{
-		titleStyle().Render(strings.ToUpper(m.title)),
-		subtitleStyle().Render(m.subtitle),
-		"",
+	lines := []string{
 		m.spin.View() + " " + titleStyle().Render(m.headline),
 		lipgloss.NewStyle().Width(contentWidth).Render(m.detail),
 		"",
@@ -550,8 +586,25 @@ func (m RunModel) renderStatusPanel(width, height int) string {
 			kvLine("step", fmt.Sprintf("%d", maxInt(m.completed, m.eventIteration())), accentViolet),
 			kvLine("Q", fmt.Sprintf("%.0f%%", resonance), accentGold),
 		}, "  "),
-	}, "\n")
+	}
 
+	// Fold in config params.
+	provider := m.provider
+	if provider == "" {
+		provider = "—"
+	}
+	model := m.model
+	if model == "" {
+		model = "default"
+	}
+	lines = append(lines, "",
+		strings.Join([]string{
+			kvLine("source", strings.ToUpper(provider), accentOrange),
+			kvLine("voice", model, accentPink),
+		}, "  "),
+	)
+
+	body := strings.Join(lines, "\n")
 	return renderPanel("OSCILLATOR", body, accentCyan, width, height)
 }
 
@@ -647,6 +700,71 @@ func (m RunModel) renderPhysicsPanel(width, height int) string {
 	}, "\n")
 
 	return renderPanel("SCOPE", body, accentGold, width, height)
+}
+
+func (m RunModel) renderDecayPanel(width, height int) string {
+	activity := float64(len(m.decay.particles))
+	epochMin := m.decay.epoch / 60.0
+	cyclePos := math.Mod(m.decay.elapsed, m.decay.epoch) / m.decay.epoch * 100
+
+	title := strings.Join([]string{
+		accentBadge(accentRed).Render(" EVENTS "),
+		subtitleStyle().Render(fmt.Sprintf("%.0f tracks  cycle %.0f%% of %.0fmin", activity, cyclePos, epochMin)),
+	}, " ")
+
+	body := strings.Join([]string{
+		title,
+		"",
+		m.decay.render(),
+	}, "\n")
+
+	return renderPanel("DECAY CHAMBER", body, accentRed, width, height)
+}
+
+func (m RunModel) renderResonancePanel(width, height int) string {
+	avgFreq := 0.0
+	for _, s := range m.resonance.sources {
+		avgFreq += s.freq
+	}
+	avgFreq /= float64(len(m.resonance.sources))
+	epochMin := m.resonance.epoch / 60.0
+
+	title := strings.Join([]string{
+		accentBadge(accentLime).Render(" MODES "),
+		subtitleStyle().Render(fmt.Sprintf("%d sources  ν̄=%.2f  epoch %.0fmin", len(m.resonance.sources), avgFreq, epochMin)),
+	}, " ")
+
+	body := strings.Join([]string{
+		title,
+		"",
+		m.resonance.render(),
+	}, "\n")
+
+	return renderPanel("RESONANCE", body, accentLime, width, height)
+}
+
+func (m RunModel) renderFluxPanel(width, height int) string {
+	activeCharges := 0
+	for _, c := range m.flux.charges {
+		fade := 0.5 + 0.5*math.Sin(c.fadePhase)
+		if fade > 0.1 {
+			activeCharges++
+		}
+	}
+	epochMin := m.flux.epoch / 60.0
+
+	title := strings.Join([]string{
+		accentBadge(accentViolet).Render(" TOPOLOGY "),
+		subtitleStyle().Render(fmt.Sprintf("%d charges  epoch %.0fmin", activeCharges, epochMin)),
+	}, " ")
+
+	body := strings.Join([]string{
+		title,
+		"",
+		m.flux.render(),
+	}, "\n")
+
+	return renderPanel("FLUX", body, accentViolet, width, height)
 }
 
 func (m RunModel) renderParamsPanel(width, height int) string {

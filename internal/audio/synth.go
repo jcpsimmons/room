@@ -1,7 +1,11 @@
 package audio
 
+// NumVoices is the number of independent synthesis voices.
+const NumVoices = 4
+
 // Synth is a minimal FM synthesizer driven by the UI animation state.
 // On macOS it outputs through CoreAudio. On other platforms it is a no-op.
+// Supports up to NumVoices independent voices mixed together.
 type Synth struct {
 	Active bool
 }

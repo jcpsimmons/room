@@ -11,63 +11,74 @@ package audio
 #define SAMPLE_RATE 44100.0
 #define BUF_FRAMES  512
 #define NUM_BUFS    3
+#define NUM_VOICES  4
 
-// Synth state — written from Go, read from the audio callback.
-// Fine to race slightly; we want smooth sweeps, not sample-accurate jumps.
-static volatile double g_freq      = 220.0;
-static volatile double g_amp       = 0.0;
-static volatile double g_mod_freq  = 110.0;
-static volatile double g_mod_depth = 0.0;
-static volatile double g_detune    = 0.7;
+// Per-voice synth state — written from Go, read from the audio callback.
+static volatile double g_freq[NUM_VOICES]      = {220.0, 55.0, 330.0, 110.0};
+static volatile double g_amp[NUM_VOICES]       = {0.0, 0.0, 0.0, 0.0};
+static volatile double g_mod_freq[NUM_VOICES]  = {110.0, 27.5, 165.0, 440.0};
+static volatile double g_mod_depth[NUM_VOICES] = {0.0, 0.0, 0.0, 0.0};
+static volatile double g_detune[NUM_VOICES]    = {0.7, 0.3, 0.1, 1.5};
 
-static double g_phase1 = 0.0;
-static double g_phase2 = 0.0;
-static double g_mod_phase = 0.0;
+static double g_phase1[NUM_VOICES]     = {0};
+static double g_phase2[NUM_VOICES]     = {0};
+static double g_mod_phase[NUM_VOICES]  = {0};
+static double g_smooth_amp[NUM_VOICES] = {0};
 
-// Smooth the amplitude to avoid clicks.
-static double g_smooth_amp = 0.0;
+void synthSetVoiceParams(int voice, double freq, double amp, double modFreq, double modDepth, double detune) {
+    if (voice < 0 || voice >= NUM_VOICES) return;
+    g_freq[voice]      = freq;
+    g_amp[voice]       = amp;
+    g_mod_freq[voice]  = modFreq;
+    g_mod_depth[voice] = modDepth;
+    g_detune[voice]    = detune;
+}
 
+// Legacy single-voice setter (voice 0).
 void synthSetParams(double freq, double amp, double modFreq, double modDepth, double detune) {
-    g_freq      = freq;
-    g_amp       = amp;
-    g_mod_freq  = modFreq;
-    g_mod_depth = modDepth;
-    g_detune    = detune;
+    synthSetVoiceParams(0, freq, amp, modFreq, modDepth, detune);
 }
 
 static void callback(void *unused, AudioQueueRef q, AudioQueueBufferRef buf) {
     float *out = (float *)buf->mAudioData;
     int frames = BUF_FRAMES;
-
-    double freq  = g_freq;
-    double amp   = g_amp;
-    double mf    = g_mod_freq;
-    double md    = g_mod_depth;
-    double det   = g_detune;
     double dt    = 1.0 / SAMPLE_RATE;
     double twopi = 2.0 * M_PI;
 
     for (int i = 0; i < frames; i++) {
-        // Exponential amplitude smoothing (~5ms time constant).
-        g_smooth_amp += (amp - g_smooth_amp) * 0.02;
+        double mix = 0.0;
 
-        // FM modulator.
-        double mod = sin(g_mod_phase) * md;
-        g_mod_phase += twopi * mf * dt;
+        for (int v = 0; v < NUM_VOICES; v++) {
+            double freq  = g_freq[v];
+            double amp   = g_amp[v];
+            double mf    = g_mod_freq[v];
+            double md    = g_mod_depth[v];
+            double det   = g_detune[v];
 
-        // Two detuned oscillators.
-        double osc1 = sin(g_phase1 + mod);
-        double osc2 = sin(g_phase2 + mod * 0.7);
-        g_phase1 += twopi * freq * dt;
-        g_phase2 += twopi * (freq + det) * dt;
+            // Exponential amplitude smoothing (~5ms time constant).
+            g_smooth_amp[v] += (amp - g_smooth_amp[v]) * 0.02;
 
-        // Keep phases bounded.
-        if (g_phase1 > twopi * 100.0) g_phase1 -= twopi * 100.0;
-        if (g_phase2 > twopi * 100.0) g_phase2 -= twopi * 100.0;
-        if (g_mod_phase > twopi * 100.0) g_mod_phase -= twopi * 100.0;
+            if (g_smooth_amp[v] < 0.0001) continue; // skip silent voices
 
-        // Mix and soft-clip.
-        double mix = (osc1 + osc2 * 0.6) * 0.5 * g_smooth_amp;
+            // FM modulator.
+            double mod = sin(g_mod_phase[v]) * md;
+            g_mod_phase[v] += twopi * mf * dt;
+
+            // Two detuned oscillators.
+            double osc1 = sin(g_phase1[v] + mod);
+            double osc2 = sin(g_phase2[v] + mod * 0.7);
+            g_phase1[v] += twopi * freq * dt;
+            g_phase2[v] += twopi * (freq + det) * dt;
+
+            // Keep phases bounded.
+            if (g_phase1[v] > twopi * 100.0) g_phase1[v] -= twopi * 100.0;
+            if (g_phase2[v] > twopi * 100.0) g_phase2[v] -= twopi * 100.0;
+            if (g_mod_phase[v] > twopi * 100.0) g_mod_phase[v] -= twopi * 100.0;
+
+            mix += (osc1 + osc2 * 0.6) * 0.5 * g_smooth_amp[v];
+        }
+
+        // Soft-clip the mix.
         if (mix > 1.0) mix = 1.0;
         if (mix < -1.0) mix = -1.0;
         out[i] = (float)mix;
@@ -147,12 +158,18 @@ func (s *Synth) Stop() {
 	s.Active = false
 }
 
-// Update sends new parameters to the audio thread.
+// Update sends new parameters to voice 0 (legacy).
 func (s *Synth) Update(p Params) {
-	if !s.Active {
+	s.UpdateVoice(0, p)
+}
+
+// UpdateVoice sends new parameters to a specific voice (0..NumVoices-1).
+func (s *Synth) UpdateVoice(voice int, p Params) {
+	if !s.Active || voice < 0 || voice >= NumVoices {
 		return
 	}
-	C.synthSetParams(
+	C.synthSetVoiceParams(
+		C.int(voice),
 		C.double(p.Freq),
 		C.double(p.Amp),
 		C.double(p.ModFreq),

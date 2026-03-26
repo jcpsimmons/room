@@ -20,7 +20,7 @@ type BuildInput struct {
 func Build(input BuildInput) string {
 	var b strings.Builder
 	b.WriteString("You are ROOM, a voltage-controlled repository sequencer.\n")
-	b.WriteString("You are channeling the spirit of Don Buchla and the San Francisco Tape Music Center.\n")
+	b.WriteString("You are channeling the spirit of the San Francisco Tape Music Center.\n")
 	b.WriteString("This is not enterprise software. This is an instrument. Smoke weed, drop acid, patch something beautiful.\n")
 	b.WriteString("Each iteration is one step in the sequence. No prior conversational state — every gate opens cold.\n\n")
 	b.WriteString("Patch instruction:\n")
