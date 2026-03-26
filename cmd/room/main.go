@@ -209,17 +209,13 @@ func newVersionCommand(info version.Info) *cobra.Command {
 	}
 }
 
-func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions, audioEnabled bool) error {
+func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
 	total := opts.Iterations
 	if total <= 0 {
 		total = 1
 	}
 
-	var runOpts []ui.RunOption
-	if audioEnabled {
-		runOpts = append(runOpts, ui.WithAudio())
-	}
-	model := ui.NewRunModel(total, runOpts...)
+	model := ui.NewRunModel(total, ui.WithAudio())
 	program := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
@@ -313,15 +309,6 @@ func shouldUseRunUI() bool {
 		return true
 	default:
 		return true
-	}
-}
-
-func shouldUseAudio() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("ROOM_AUDIO"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
 	}
 }
 
