@@ -9,26 +9,18 @@ import (
 )
 
 var (
-	bgColor      = lipgloss.Color("#090B16")
-	panelColor   = lipgloss.Color("#11182B")
-	panelSoft    = lipgloss.Color("#16213A")
-	textColor    = lipgloss.Color("#F5F7FF")
-	dimColor     = lipgloss.Color("#93A4D7")
-	accentCyan   = lipgloss.Color("#35F2FF")
-	accentPink   = lipgloss.Color("#FF4FD8")
-	accentLime   = lipgloss.Color("#7CFF6B")
-	accentGold   = lipgloss.Color("#FFD84D")
-	accentOrange = lipgloss.Color("#FF9A3D")
-	accentRed    = lipgloss.Color("#FF5F7A")
-	accentViolet = lipgloss.Color("#AA7BFF")
+	bgColor      = lipgloss.Color("#1A0A0A")
+	panelColor   = lipgloss.Color("#2B1215")
+	textColor = lipgloss.Color("#E8D5C4")
+	dimColor     = lipgloss.Color("#8B6F5E")
+	accentCyan   = lipgloss.Color("#C4956A") // warm amber (patch cable)
+	accentPink   = lipgloss.Color("#D43B2E") // buchla red
+	accentLime   = lipgloss.Color("#C89B3C") // oxidized brass
+	accentGold   = lipgloss.Color("#E8A435") // hot filament
+	accentOrange = lipgloss.Color("#B85C2E") // burnt sienna
+	accentRed    = lipgloss.Color("#9E2A1F") // deep oxide
+	accentViolet = lipgloss.Color("#7A5C8A") // tube glow
 )
-
-func basePanel() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(textColor).
-		Background(bgColor).
-		Padding(0, 1)
-}
 
 func neonPanel(accent lipgloss.Color) lipgloss.Style {
 	return lipgloss.NewStyle().
@@ -38,13 +30,6 @@ func neonPanel(accent lipgloss.Color) lipgloss.Style {
 		BorderForeground(accent).
 		Padding(0, 1).
 		MarginTop(0)
-}
-
-func softPanel() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(textColor).
-		Background(panelSoft).
-		Padding(0, 1)
 }
 
 func titleStyle() lipgloss.Style {
@@ -81,13 +66,6 @@ func rainbow(text string) string {
 	return b.String()
 }
 
-func wrapLines(lines []string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	return strings.Join(lines, "\n")
-}
-
 func bulletLines(items []string, color lipgloss.Color) string {
 	if len(items) == 0 {
 		return subtitleStyle().Render("none")
@@ -97,7 +75,7 @@ func bulletLines(items []string, color lipgloss.Color) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(bulletStyle(color).Render("• "))
+		b.WriteString(bulletStyle(color).Render("▸ "))
 		b.WriteString(item)
 	}
 	return b.String()
@@ -128,15 +106,23 @@ func framed(title, body string, accent lipgloss.Color) string {
 func statusBadge(kind string) string {
 	switch kind {
 	case "done", "success":
-		return accentBadge(accentLime).Render(" DONE ")
+		return accentBadge(accentLime).Render(" PATCH COMPLETE ")
 	case "dry_run":
-		return accentBadge(accentGold).Render(" DRY ")
+		return accentBadge(accentGold).Render(" MONITOR ")
 	case "pivot":
-		return accentBadge(accentGold).Render(" PIVOT ")
+		return accentBadge(accentGold).Render(" REROUTE ")
 	case "failed", "failure":
-		return accentBadge(accentRed).Render(" FAIL ")
+		return accentBadge(accentRed).Render(" OVERLOAD ")
 	case "running":
-		return accentBadge(accentCyan).Render(" RUN ")
+		return accentBadge(accentCyan).Render(" GATE OPEN ")
+	case "boot":
+		return accentBadge(accentOrange).Render(" WARMING ")
+	case "start":
+		return accentBadge(accentGold).Render(" VOLTAGE ON ")
+	case "step":
+		return accentBadge(accentCyan).Render(" STEP ")
+	case "complete":
+		return accentBadge(accentLime).Render(" CYCLE ")
 	default:
 		return accentBadge(accentViolet).Render(" " + strings.ToUpper(kind) + " ")
 	}

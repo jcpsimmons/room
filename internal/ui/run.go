@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jcpsimmons/room/internal/audio"
 )
 
 type ProgressKind string
@@ -42,6 +43,13 @@ type ProgressEvent struct {
 	HasPercent   bool
 	When         time.Time
 	Meta         map[string]any
+
+	// Run params surfaced in the CONFIG panel.
+	Provider      string
+	Model         string
+	RepoRoot      string
+	CommitEnabled bool
+	DryRun        bool
 }
 
 type ProgressCarrier interface {
@@ -62,14 +70,12 @@ func AsProgress(msg any) (ProgressEvent, bool) {
 		return value, true
 	case ProgressMsg:
 		return value.Event, true
-	case ProgressCarrier:
-		return value.ProgressEvent(), true
 	case *ProgressMsg:
 		if value == nil {
 			return ProgressEvent{}, false
 		}
 		return value.Event, true
-	case interface{ ProgressEvent() ProgressEvent }:
+	case ProgressCarrier:
 		return value.ProgressEvent(), true
 	default:
 		return ProgressEvent{}, false
@@ -90,6 +96,13 @@ type RunModel struct {
 	detail    string
 	events    []ProgressEvent
 
+	// Run config params for the CONFIG panel.
+	provider      string
+	model         string
+	repoRoot      string
+	commitEnabled bool
+	dryRun        bool
+
 	width  int
 	height int
 
@@ -105,19 +118,30 @@ type RunModel struct {
 	phase float64
 	trail []trailPoint
 
+	// Spark particles launched on status changes.
+	sparks []spark
+
+	// Audio synthesis.
+	synth *audio.Synth
+
 	lastFrame time.Time
 	started   time.Time
 }
 
 type trailPoint struct {
-	X float64
-	Y float64
+	X, Y float64
 }
 
-func NewRunModel(total int) RunModel {
+type spark struct {
+	proj *harmonica.Projectile
+	age  float64
+	glyph rune
+}
+
+func NewRunModel(total int, opts ...RunOption) RunModel {
 	bar := progress.New(
-		progress.WithGradient("#35F2FF", "#FF4FD8"),
-		progress.WithFillCharacters('█', '░'),
+		progress.WithGradient("#9E2A1F", "#E8A435"),
+		progress.WithFillCharacters('▮', '▯'),
 		progress.WithoutPercentage(),
 	)
 	bar.Width = 36
@@ -127,15 +151,20 @@ func NewRunModel(total int) RunModel {
 		spinner.WithStyle(titleStyle().Foreground(accentCyan)),
 	)
 
+	var rc runConfig
+	for _, o := range opts {
+		o(&rc)
+	}
+
 	now := time.Now()
-	return RunModel{
-		title:     "ROOM live run",
-		subtitle:  "orchestrating repo improvement in real time",
+	m := RunModel{
+		title:     "ROOM series 100",
+		subtitle:  "voltage-controlled repository sequencer",
 		total:     total,
 		bar:       bar,
 		spin:      spin,
-		springX:   harmonica.NewSpring(harmonica.FPS(30), 9.0, 0.62),
-		springY:   harmonica.NewSpring(harmonica.FPS(30), 8.0, 0.58),
+		springX:   harmonica.NewSpring(harmonica.FPS(30), 6.0, 0.28),
+		springY:   harmonica.NewSpring(harmonica.FPS(30), 5.0, 0.22),
 		orbX:      10,
 		orbY:      4,
 		trail:     []trailPoint{{X: 10, Y: 4}},
@@ -144,13 +173,39 @@ func NewRunModel(total int) RunModel {
 		lastFrame: now,
 		started:   now,
 		status:    ProgressBoot,
-		headline:  "warming the hyperdrive",
-		detail:    "booting the neon loop",
+		headline:  "oscillator warming",
+		detail:    "filaments reaching operating temperature",
 	}
+	if rc.audio {
+		m.synth = audio.New()
+	}
+	return m
+}
+
+type runConfig struct {
+	audio bool
+}
+
+// RunOption configures the run model.
+type RunOption func(*runConfig)
+
+// WithAudio enables the FM synthesizer output.
+func WithAudio() RunOption {
+	return func(c *runConfig) { c.audio = true }
 }
 
 func (m RunModel) Init() tea.Cmd {
+	if m.synth != nil {
+		_ = m.synth.Start()
+	}
 	return tea.Batch(m.spin.Tick, m.frameCmd())
+}
+
+// Shutdown stops audio output. Call after the program exits.
+func (m RunModel) Shutdown() {
+	if m.synth != nil {
+		m.synth.Stop()
+	}
 }
 
 func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -169,7 +224,7 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(value)
 		return m, cmd
 	case frameMsg:
-		m.stepFrame(time.Time(value))
+		m = m.stepFrame(time.Time(value))
 		if m.percent > 1 {
 			m.percent = 1
 		}
@@ -220,21 +275,28 @@ func (m RunModel) View() string {
 	if mainHeight < 14 {
 		mainHeight = 14
 	}
-	rightTopHeight := mainHeight / 2
-	if rightTopHeight < 8 {
-		rightTopHeight = 8
+
+	// Split right column into three: ENGINE (physics), CONFIG, EVENTS.
+	engineHeight := 14
+	if engineHeight > mainHeight/2 {
+		engineHeight = mainHeight / 2
 	}
-	rightBottomHeight := mainHeight - rightTopHeight - 1
-	if rightBottomHeight < 6 {
-		rightBottomHeight = 6
-		rightTopHeight = mainHeight - rightBottomHeight - 1
+	if engineHeight < 10 {
+		engineHeight = 10
+	}
+	configHeight := 8
+	eventsHeight := mainHeight - engineHeight - configHeight
+	if eventsHeight < 5 {
+		eventsHeight = 5
+		configHeight = mainHeight - engineHeight - eventsHeight
 	}
 
 	header := m.renderHeader(innerWidth, headerHeight)
 	left := m.renderStatusPanel(leftWidth, mainHeight)
 	right := lipglossJoinVertical(
-		m.renderPhysicsPanel(rightWidth, rightTopHeight),
-		m.renderEventStream(rightWidth, rightBottomHeight),
+		m.renderPhysicsPanel(rightWidth, engineHeight),
+		m.renderParamsPanel(rightWidth, configHeight),
+		m.renderEventStream(rightWidth, eventsHeight),
 	)
 
 	frame := lipglossJoinHorizontal(
@@ -243,10 +305,10 @@ func (m RunModel) View() string {
 		right,
 	)
 
-	footer := renderPanel("HINTS", strings.Join([]string{
+	footer := renderPanel("MANUAL", strings.Join([]string{
 		statusBadge(string(m.status)),
-		subtitleStyle().Render("ctrl+c stops the run"),
-	}, "  "), accentViolet, innerWidth, footerHeight)
+		subtitleStyle().Render("ctrl+c closes the gate"),
+	}, "  "), accentRed, innerWidth, footerHeight)
 
 	content := lipglossJoinVertical(
 		header,
@@ -295,6 +357,21 @@ func (m RunModel) consume(ev ProgressEvent) RunModel {
 	if ev.Kind != "" {
 		m.status = ev.Kind
 	}
+	if ev.Provider != "" {
+		m.provider = ev.Provider
+	}
+	if ev.Model != "" {
+		m.model = ev.Model
+	}
+	if ev.RepoRoot != "" {
+		m.repoRoot = ev.RepoRoot
+	}
+	if ev.CommitEnabled {
+		m.commitEnabled = true
+	}
+	if ev.DryRun {
+		m.dryRun = true
+	}
 	m.events = append(m.events, ev)
 	if len(m.events) > 10 {
 		m.events = append([]ProgressEvent(nil), m.events[len(m.events)-10:]...)
@@ -323,15 +400,70 @@ func (m RunModel) stepFrame(now time.Time) RunModel {
 		dt = 1.0 / 30.0
 	}
 	m.lastFrame = now
-	m.phase += dt * 2.1
+	m.phase += dt * 2.8
 
 	targetX, targetY := m.targetPoint()
+	prevX, prevY := m.orbX, m.orbY
 	m.orbX, m.orbVX = m.springX.Update(m.orbX, m.orbVX, targetX)
 	m.orbY, m.orbVY = m.springY.Update(m.orbY, m.orbVY, targetY)
+
+	// Longer, juicier trail.
 	m.trail = append(m.trail, trailPoint{X: m.orbX, Y: m.orbY})
-	if len(m.trail) > 14 {
-		m.trail = append([]trailPoint(nil), m.trail[len(m.trail)-14:]...)
+	if len(m.trail) > 28 {
+		m.trail = append([]trailPoint(nil), m.trail[len(m.trail)-28:]...)
 	}
+
+	// Emit sparks when the orb is moving fast (spring overshoot).
+	speed := math.Sqrt((m.orbX-prevX)*(m.orbX-prevX) + (m.orbY-prevY)*(m.orbY-prevY))
+	if speed > 0.6 && len(m.sparks) < 12 {
+		glyphs := []rune{'∿', '≋', '∼', '⏦', '·'}
+		g := glyphs[len(m.trail)%len(glyphs)]
+		// Fling spark perpendicular to motion.
+		dx, dy := m.orbX-prevX, m.orbY-prevY
+		m.sparks = append(m.sparks, spark{
+			proj: harmonica.NewProjectile(
+				harmonica.FPS(30),
+				harmonica.Point{X: m.orbX, Y: m.orbY},
+				harmonica.Vector{X: -dy * 3, Y: dx * 3},
+				harmonica.Vector{X: 0, Y: 0.8},
+			),
+			glyph: g,
+		})
+	}
+
+	// Tick sparks and cull dead ones.
+	alive := m.sparks[:0]
+	for _, s := range m.sparks {
+		s.proj.Update()
+		s.age += dt
+		if s.age < 1.2 {
+			alive = append(alive, s)
+		}
+	}
+	m.sparks = alive
+
+	// Drive the synth from the orbit state.
+	if m.synth != nil {
+		speed := math.Sqrt(m.orbVX*m.orbVX + m.orbVY*m.orbVY)
+		// X position → pitch: map grid range [0,22] to [55, 440] Hz (A1–A4).
+		freq := 55.0 * math.Pow(2.0, m.orbX/7.33)
+		// Velocity → amplitude with gentle curve. Quiet when still.
+		amp := math.Min(speed*0.15, 0.7)
+		// Y position → FM modulation depth: deeper at edges.
+		modDepth := math.Abs(m.orbY-4.5) * 0.8
+		// Modulator at a fifth above fundamental for metallic Buchla timbre.
+		modFreq := freq * 1.5
+		// Slight detune for beating.
+		detune := 0.5 + math.Sin(m.phase*0.3)*0.3
+		m.synth.Update(audio.Params{
+			Freq:     freq,
+			Amp:      amp,
+			ModFreq:  modFreq,
+			ModDepth: modDepth,
+			Detune:   detune,
+		})
+	}
+
 	return m
 }
 
@@ -340,37 +472,56 @@ func (m RunModel) targetPoint() (float64, float64) {
 	const gridH = 9
 
 	progress := m.progressValue()
-	x := 1 + progress*float64(gridW-3)
-	y := 1 + (math.Sin(m.phase)*0.5+0.5)*float64(gridH-3)
+
+	// Primary: progress sweeps left→right. Secondary: lissajous wobble.
+	x := 1 + progress*float64(gridW-3) + math.Sin(m.phase*1.3)*2.0
+	y := 1 + (math.Sin(m.phase)*0.5+0.5)*float64(gridH-3) + math.Cos(m.phase*0.7)*1.5
+
+	// Clamp to grid.
+	if x < 0 {
+		x = 0
+	}
+	if x > float64(gridW-1) {
+		x = float64(gridW - 1)
+	}
+	if y < 0 {
+		y = 0
+	}
+	if y > float64(gridH-1) {
+		y = float64(gridH - 1)
+	}
 
 	switch m.status {
 	case ProgressFailure:
-		x = 1
-		y = float64(gridH - 3)
+		x = 1 + math.Sin(m.phase*4)*1.5 // jitter on failure
+		y = float64(gridH-3) + math.Cos(m.phase*3)*0.8
 	case ProgressPivot:
-		x = float64(gridW / 2)
-		y = 1
+		x = float64(gridW/2) + math.Sin(m.phase*2)*3
+		y = 1 + math.Abs(math.Sin(m.phase*1.5))*2
 	case ProgressDone:
-		x = float64(gridW - 3)
-		y = 1
+		x = float64(gridW-3) + math.Sin(m.phase*0.5)*0.5
+		y = 1 + math.Sin(m.phase*0.3)*0.3
 	case ProgressBoot:
-		x = float64(gridW / 3)
-		y = float64(gridH / 2)
+		x = float64(gridW/3) + math.Sin(m.phase)*2.5
+		y = float64(gridH/2) + math.Cos(m.phase*1.4)*2
 	}
 	return x, y
 }
 
 func (m RunModel) renderHeader(width, height int) string {
+	// Fake a drifting voltage reading from phase.
+	voltage := 3.3 + math.Sin(m.phase*0.9)*1.7 + math.Sin(m.phase*2.3)*0.4
 	body := strings.Join([]string{
-		rainbow("NEON ITERATION ENGINE"),
-		subtitleStyle().Render("orchestrating repo improvement in real time"),
+		titleStyle().Render("BUCHLA SERIES 100 SEQUENCER"),
+		subtitleStyle().Render("san francisco, ca"),
 		strings.Join([]string{
-			kvLine("status", string(m.status), accentPink),
-			kvLine("progress", fmt.Sprintf("%d/%d", m.completed, maxInt(m.total, 1)), accentCyan),
-			kvLine("elapsed", time.Since(m.started).Round(time.Millisecond).String(), accentGold),
+			kvLine("gate", string(m.status), accentPink),
+			kvLine("sequence", fmt.Sprintf("%d/%d", m.completed, maxInt(m.total, 1)), accentCyan),
+			kvLine("cv", fmt.Sprintf("%.2fV", voltage), accentGold),
+			kvLine("elapsed", time.Since(m.started).Round(time.Millisecond).String(), accentOrange),
 		}, "  "),
 	}, "\n")
-	return renderPanel("ROOM LIVE", body, accentCyan, width, height)
+	return renderPanel("PATCH", body, accentPink, width, height)
 }
 
 func (m RunModel) renderStatusPanel(width, height int) string {
@@ -383,8 +534,10 @@ func (m RunModel) renderStatusPanel(width, height int) string {
 	bar := m.bar
 	bar.Width = contentWidth
 
+	// Oscillating resonance meter.
+	resonance := math.Abs(math.Sin(m.phase*1.7)) * 100
 	body := strings.Join([]string{
-		rainbow(strings.ToUpper(m.title)),
+		titleStyle().Render(strings.ToUpper(m.title)),
 		subtitleStyle().Render(m.subtitle),
 		"",
 		m.spin.View() + " " + titleStyle().Render(m.headline),
@@ -393,12 +546,13 @@ func (m RunModel) renderStatusPanel(width, height int) string {
 		bar.ViewAs(m.progressValue()),
 		"",
 		strings.Join([]string{
-			kvLine("failures", fmt.Sprintf("%d", m.failures), accentGold),
-			kvLine("iteration", fmt.Sprintf("%d", maxInt(m.completed, m.eventIteration())), accentViolet),
+			kvLine("overload", fmt.Sprintf("%d", m.failures), accentRed),
+			kvLine("step", fmt.Sprintf("%d", maxInt(m.completed, m.eventIteration())), accentViolet),
+			kvLine("Q", fmt.Sprintf("%.0f%%", resonance), accentGold),
 		}, "  "),
 	}, "\n")
 
-	return renderPanel("RUN", body, accentCyan, width, height)
+	return renderPanel("OSCILLATOR", body, accentCyan, width, height)
 }
 
 func (m RunModel) eventIteration() int {
@@ -414,43 +568,62 @@ func (m RunModel) renderPhysicsPanel(width, height int) string {
 	const gridW = 22
 	const gridH = 9
 
-	gx := int(math.Round(m.orbX))
-	gy := int(math.Round(m.orbY))
-	if gx < 0 {
-		gx = 0
-	}
-	if gy < 0 {
-		gy = 0
-	}
-	if gx >= gridW {
-		gx = gridW - 1
-	}
-	if gy >= gridH {
-		gy = gridH - 1
-	}
+	gx := clampInt(int(math.Round(m.orbX)), 0, gridW-1)
+	gy := clampInt(int(math.Round(m.orbY)), 0, gridH-1)
 
+	// Build trail heat-map — phosphor persistence.
 	trail := make(map[[2]int]int, len(m.trail))
 	for i, pt := range m.trail {
-		x := int(math.Round(pt.X))
-		y := int(math.Round(pt.Y))
-		if x < 0 || y < 0 || x >= gridW || y >= gridH {
-			continue
-		}
+		x := clampInt(int(math.Round(pt.X)), 0, gridW-1)
+		y := clampInt(int(math.Round(pt.Y)), 0, gridH-1)
 		trail[[2]int{x, y}] = i + 1
 	}
+
+	// Spark positions.
+	sparkMap := make(map[[2]int]rune, len(m.sparks))
+	for _, s := range m.sparks {
+		pos := s.proj.Position()
+		sx := clampInt(int(math.Round(pos.X)), 0, gridW-1)
+		sy := clampInt(int(math.Round(pos.Y)), 0, gridH-1)
+		sparkMap[[2]int{sx, sy}] = s.glyph
+	}
+
+	// Phosphor decay: recent = bright amber, old = dim red.
+	trailColors := []lipgloss.Color{accentRed, accentOrange, accentGold, accentCyan}
+	centerX, centerY := gridW/2, gridH/2
 
 	var b strings.Builder
 	for y := 0; y < gridH; y++ {
 		for x := 0; x < gridW; x++ {
+			key := [2]int{x, y}
 			switch {
 			case x == gx && y == gy:
-				b.WriteString(accentBadge(accentCyan).Render("•"))
-			case x == gridW/2 && y == gridH/2:
-				b.WriteString(accentBadge(accentPink).Render("◉"))
-			case x == gridW/2 || y == gridH/2:
-				b.WriteString(subtitleStyle().Render("·"))
-			case trail[[2]int{x, y}] > 0:
-				b.WriteString(bulletStyle(accentViolet).Render("·"))
+				// Beam head — the electron dot.
+				glyphs := []string{"█", "▓", "▒", "▓"}
+				gi := int(m.phase*8) % len(glyphs)
+				b.WriteString(accentBadge(accentGold).Render(glyphs[gi]))
+			case sparkMap[key] != 0:
+				b.WriteString(bulletStyle(accentGold).Render(string(sparkMap[key])))
+			case x == centerX && y == centerY:
+				// Graticule center.
+				b.WriteString(bulletStyle(accentPink).Render("+"))
+			case trail[key] > 0:
+				age := trail[key]
+				ci := age * len(trailColors) / (len(m.trail) + 1)
+				if ci >= len(trailColors) {
+					ci = len(trailColors) - 1
+				}
+				// Phosphor decay glyphs.
+				dots := []string{".", ":", "~", "░"}
+				di := age * len(dots) / (len(m.trail) + 1)
+				if di >= len(dots) {
+					di = len(dots) - 1
+				}
+				b.WriteString(bulletStyle(trailColors[ci]).Render(dots[di]))
+			case x == centerX:
+				b.WriteString(subtitleStyle().Render("│"))
+			case y == centerY:
+				b.WriteString(subtitleStyle().Render("─"))
 			default:
 				b.WriteString(subtitleStyle().Render(" "))
 			}
@@ -460,9 +633,11 @@ func (m RunModel) renderPhysicsPanel(width, height int) string {
 		}
 	}
 
+	vel := math.Sqrt(m.orbVX*m.orbVX + m.orbVY*m.orbVY)
+	freq := 20.0 + vel*120.0 // map velocity to "frequency"
 	title := strings.Join([]string{
-		accentBadge(accentPink).Render(" ORBIT "),
-		subtitleStyle().Render(fmt.Sprintf("x=%.1f y=%.1f", m.orbX, m.orbY)),
+		accentBadge(accentPink).Render(" TRACE "),
+		subtitleStyle().Render(fmt.Sprintf("%.0fHz  %.1fVpp", freq, vel*2.2)),
 	}, " ")
 
 	body := strings.Join([]string{
@@ -471,12 +646,57 @@ func (m RunModel) renderPhysicsPanel(width, height int) string {
 		b.String(),
 	}, "\n")
 
-	return renderPanel("ENGINE", body, accentPink, width, height)
+	return renderPanel("SCOPE", body, accentGold, width, height)
+}
+
+func (m RunModel) renderParamsPanel(width, height int) string {
+	provider := m.provider
+	if provider == "" {
+		provider = "—"
+	}
+	model := m.model
+	if model == "" {
+		model = "default"
+	}
+	repo := m.repoRoot
+	if repo == "" {
+		repo = "—"
+	}
+	commitMode := "off"
+	if m.commitEnabled {
+		commitMode = "on"
+	}
+	dryRun := "no"
+	if m.dryRun {
+		dryRun = "yes"
+	}
+
+	lines := []string{
+		kvLine("source", strings.ToUpper(provider), accentCyan),
+		kvLine("voice", model, accentPink),
+		kvLine("patch", repo, accentViolet),
+		kvLine("steps", fmt.Sprintf("%d", m.total), accentGold),
+		kvLine("record", commitMode, accentLime),
+		kvLine("monitor", dryRun, accentOrange),
+	}
+
+	body := strings.Join(lines, "\n")
+	return renderPanel("PATCH BAY", body, accentOrange, width, height)
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func (m RunModel) renderEventStream(width, height int) string {
 	if len(m.events) == 0 {
-		return renderPanel("EVENTS", subtitleStyle().Render("waiting for progress messages"), accentOrange, width, height)
+		return renderPanel("SEQUENCE MEMORY", subtitleStyle().Render("awaiting first gate"), accentViolet, width, height)
 	}
 	var lines []string
 	for i := len(m.events) - 1; i >= 0 && len(lines) < 6; i-- {
@@ -490,7 +710,7 @@ func (m RunModel) renderEventStream(width, height int) string {
 			lines = append(lines, "  "+subtitleStyle().Render(ev.Detail))
 		}
 	}
-	return renderPanel("EVENTS", strings.Join(lines, "\n"), accentOrange, width, height)
+	return renderPanel("SEQUENCE MEMORY", strings.Join(lines, "\n"), accentViolet, width, height)
 }
 
 func (m RunModel) frameCmd() tea.Cmd {

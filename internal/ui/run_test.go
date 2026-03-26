@@ -37,10 +37,10 @@ func TestRunModelViewFillsViewport(t *testing.T) {
 	if got := lipgloss.Height(view); got != 32 {
 		t.Fatalf("view height = %d, want 32", got)
 	}
-	if !strings.Contains(view, "ROOM LIVE") {
+	if !strings.Contains(view, "PATCH") {
 		t.Fatal("expected header in run view")
 	}
-	if !strings.Contains(view, "EVENTS") {
+	if !strings.Contains(view, "SEQUENCE MEMORY") {
 		t.Fatal("expected events panel in run view")
 	}
 }

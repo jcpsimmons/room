@@ -84,6 +84,7 @@ func newInitCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 
 func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	var opts app.RunOptions
+	var audioEnabled bool
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the improvement loop",
@@ -93,9 +94,12 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			opts.AllowDirtySet = cmd.Flags().Changed("allow-dirty")
 			opts.VerboseSet = cmd.Flags().Changed("verbose")
 			opts.JSONSet = cmd.Flags().Changed("json")
+			if !audioEnabled {
+				audioEnabled = shouldUseAudio()
+			}
 			if !opts.JSON && canStyleOutput() {
 				if shouldUseRunUI() {
-					return runWithUI(ctx, svc, opts)
+					return runWithUI(ctx, svc, opts, audioEnabled)
 				}
 				return runWithLiveProgress(ctx, svc, opts)
 			}
@@ -121,6 +125,7 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	cmd.Flags().StringVar(&opts.InstructionFile, "instruction-file", "", "override the instruction file path")
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", "", "override the config path")
 	cmd.Flags().StringVar(&opts.CommitPrefix, "commit-prefix", "", "override the configured commit prefix")
+	cmd.Flags().BoolVar(&audioEnabled, "audio", false, "enable FM synthesis output (macOS)")
 	return cmd
 }
 
@@ -209,13 +214,17 @@ func newVersionCommand(info version.Info) *cobra.Command {
 	}
 }
 
-func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
+func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions, audioEnabled bool) error {
 	total := opts.Iterations
 	if total <= 0 {
 		total = 1
 	}
 
-	model := ui.NewRunModel(total)
+	var runOpts []ui.RunOption
+	if audioEnabled {
+		runOpts = append(runOpts, ui.WithAudio())
+	}
+	model := ui.NewRunModel(total, runOpts...)
 	program := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
@@ -242,6 +251,7 @@ func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error
 	}()
 
 	_, uiErr := program.Run()
+	model.Shutdown()
 	result := <-resultCh
 
 	renderErr := renderRun(result.report)
@@ -311,6 +321,15 @@ func shouldUseRunUI() bool {
 	}
 }
 
+func shouldUseAudio() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ROOM_AUDIO"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
 	total := event.RequestedIterations
 	if total <= 0 {
@@ -335,30 +354,36 @@ func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
 		HasFailures:  true,
 		HasPercent:   total > 0,
 		When:         progressWhen(event),
+
+		Provider:      event.Provider,
+		Model:         event.Model,
+		RepoRoot:      event.RepoRoot,
+		CommitEnabled: event.CommitEnabled,
+		DryRun:        event.DryRun,
 	}
 
 	switch event.Phase {
 	case app.RunProgressPhaseRunStart:
 		out.Kind = ui.ProgressStart
-		out.Title = "igniting the room"
-		out.Detail = fmt.Sprintf("%s via %s", event.RepoRoot, strings.ToUpper(event.Provider))
+		out.Title = "voltage applied"
+		out.Detail = fmt.Sprintf("patched %s through %s", event.RepoRoot, strings.ToUpper(event.Provider))
 	case app.RunProgressPhaseIterationStart:
 		out.Kind = ui.ProgressStep
-		out.Title = fmt.Sprintf("iteration %d armed", event.Iteration)
+		out.Title = fmt.Sprintf("step %d gate open", event.Iteration)
 		out.Detail = event.RunDir
 	case app.RunProgressPhaseAgentExecutionStart:
 		out.Kind = ui.ProgressStep
-		out.Title = fmt.Sprintf("%s is cooking", strings.ToUpper(event.Provider))
-		out.Detail = fmt.Sprintf("iteration %d prompt locked in", event.Iteration)
+		out.Title = fmt.Sprintf("%s oscillating", strings.ToUpper(event.Provider))
+		out.Detail = fmt.Sprintf("step %d signal routed", event.Iteration)
 	case app.RunProgressPhaseIterationSuccess:
 		out.Kind = ui.ProgressComplete
-		out.Title = fmt.Sprintf("iteration %d landed", event.Iteration)
+		out.Title = fmt.Sprintf("step %d output captured", event.Iteration)
 		if event.Summary != "" {
 			out.Detail = event.Summary
 		} else if event.DryRun {
-			out.Detail = "dry run prepared artifacts without executing the agent"
+			out.Detail = "monitor mode, no signal committed to tape"
 		} else {
-			out.Detail = "iteration completed cleanly"
+			out.Detail = "waveform recorded"
 		}
 		switch event.Status {
 		case "pivot":
@@ -370,30 +395,30 @@ func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
 		}
 	case app.RunProgressPhaseIterationFailure:
 		out.Kind = ui.ProgressFailure
-		out.Title = fmt.Sprintf("iteration %d glitched", event.Iteration)
-		out.Detail = errorText(event.Err, "agent execution failed")
+		out.Title = fmt.Sprintf("step %d overloaded", event.Iteration)
+		out.Detail = errorText(event.Err, "signal clipped")
 	case app.RunProgressPhaseRunFinish:
 		switch {
 		case event.Err != nil:
 			out.Kind = ui.ProgressFailure
-			out.Title = "run halted"
+			out.Title = "sequence interrupted"
 			out.Detail = event.Err.Error()
 		case event.Status == "dry_run":
 			out.Kind = ui.ProgressComplete
-			out.Title = "dry run complete"
-			out.Detail = "artifacts were generated without invoking the agent"
+			out.Title = "monitor pass complete"
+			out.Detail = "all signals observed, nothing committed to tape"
 			out.Percent = 1
 			out.HasPercent = true
 		case event.Status == "done":
 			out.Kind = ui.ProgressDone
-			out.Title = "run complete"
-			out.Detail = "agent says the repo is done"
+			out.Title = "sequence complete"
+			out.Detail = "all voices report silence"
 			out.Percent = 1
 			out.HasPercent = true
 		default:
 			out.Kind = ui.ProgressComplete
-			out.Title = "requested loop complete"
-			out.Detail = fmt.Sprintf("%d iterations finished", event.CompletedIterations)
+			out.Title = "sequence ended"
+			out.Detail = fmt.Sprintf("%d steps through the filter", event.CompletedIterations)
 			if total > 0 && event.CompletedIterations >= total {
 				out.Percent = 1
 				out.HasPercent = true

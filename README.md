@@ -8,6 +8,8 @@ It runs a cold-start loop against a git repository: build context from local sta
 
 The name is also a small shout-out to Alvin Lucier's [*I Am Sitting in a Room*](https://monoskop.org/Alvin_Lucier).
 
+fka the Token Burner 9000.
+
 ## Why
 
 The original shell-script prototype worked until it didn’t. ROOM exists to make that loop reliable:

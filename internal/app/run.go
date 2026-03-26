@@ -53,6 +53,7 @@ type RunProgressEvent struct {
 	Phase               RunProgressPhase `json:"phase"`
 	RepoRoot            string           `json:"repo_root"`
 	Provider            string           `json:"provider"`
+	Model               string           `json:"model"`
 	RequestedIterations int              `json:"requested_iterations"`
 	CompletedIterations int              `json:"completed_iterations"`
 	Failures            int              `json:"failures"`
@@ -139,10 +140,15 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			Err:                 err,
 		})
 	}()
+	model := cfg.Codex.Model
+	if agent.NormalizeProvider(cfg.Agent.Provider) == agent.ProviderClaude {
+		model = cfg.Claude.Model
+	}
 	emitRunProgress(progress, RunProgressEvent{
 		Phase:               RunProgressPhaseRunStart,
 		RepoRoot:            repoRoot,
 		Provider:            report.Provider,
+		Model:               model,
 		RequestedIterations: opts.Iterations,
 		CommitEnabled:       commitEnabled,
 	})
