@@ -84,7 +84,6 @@ func newInitCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 
 func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	var opts app.RunOptions
-	var audioEnabled bool
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the improvement loop",
@@ -94,12 +93,9 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			opts.AllowDirtySet = cmd.Flags().Changed("allow-dirty")
 			opts.VerboseSet = cmd.Flags().Changed("verbose")
 			opts.JSONSet = cmd.Flags().Changed("json")
-			if !audioEnabled {
-				audioEnabled = shouldUseAudio()
-			}
 			if !opts.JSON && canStyleOutput() {
 				if shouldUseRunUI() {
-					return runWithUI(ctx, svc, opts, audioEnabled)
+					return runWithUI(ctx, svc, opts)
 				}
 				return runWithLiveProgress(ctx, svc, opts)
 			}
@@ -125,7 +121,6 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	cmd.Flags().StringVar(&opts.InstructionFile, "instruction-file", "", "override the instruction file path")
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", "", "override the config path")
 	cmd.Flags().StringVar(&opts.CommitPrefix, "commit-prefix", "", "override the configured commit prefix")
-	cmd.Flags().BoolVar(&audioEnabled, "audio", false, "enable FM synthesis output (macOS)")
 	return cmd
 }
 
