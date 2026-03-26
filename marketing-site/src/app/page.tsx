@@ -396,9 +396,6 @@ export default function HomePage() {
             <LinkChip href="https://github.com/jcpsimmons/room" dark>
               GitHub repo
             </LinkChip>
-            <LinkChip href="https://www.youtube.com/@drjoshcsimmons" dark>
-              YouTube channel
-            </LinkChip>
             <LinkChip href={newsletterSignupUrl} dark>
               Newsletter sign up
             </LinkChip>
