@@ -4,9 +4,9 @@ ROOM is a standalone CLI for recursive repo improvement with Codex or Claude Cod
 
 ROOM stands for Repetitively Obsessively Optimize Me.
 
-It runs a cold-start loop against a git repository: build context from local state, ask the selected agent for one concrete improvement, validate the structured result, optionally commit it, generate the next instruction, and repeat. Think of it as a repeated resonance chamber for repo improvement, built as a sharp local operator tool rather than a platform.
+It runs a self-perpetuating cold-start loop against a git repository: build context from local state, ask the selected agent for one concrete improvement, validate the structured result, optionally commit it, generate the next instruction, and repeat. Think of it as a repeated resonance chamber for repo improvement, built as a sharp local operator tool rather than a platform.
 
-The name is also a small shout-out to Alvin Lucier's [*I Am Sitting in a Room*](https://monoskop.org/Alvin_Lucier).
+The name is also a small shout-out to Alvin Lucier's [_I Am Sitting in a Room_](https://monoskop.org/Alvin_Lucier).
 
 fka the Token Burner 9000.
 
