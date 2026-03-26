@@ -186,21 +186,21 @@ export default function HomePage() {
               universal background radiation to settle into a groove. It's kinda
               like raising a kid, you give some guidance but then they grow up.
             </p>
-            <div className="example-spotlight">
+            <a
+              className="example-spotlight"
+              href="https://room-signal-garden.vercel.app/"
+              target="_blank"
+              rel="noreferrer"
+            >
               <p className="eyebrow">Example build</p>
-              <a
-                className="example-spotlight__link"
-                href="https://room-signal-garden.vercel.app/"
-                target="_blank"
-                rel="noreferrer"
-              >
+              <span className="example-spotlight__link">
                 room-signal-garden.vercel.app
-              </a>
+              </span>
               <p className="example-spotlight__note">
                 Built from one prompt. Then gpt-5.3-codex-spark ran 100
                 iterations without my input.
               </p>
-            </div>
+            </a>
             <div className="hero-copy__actions">
               <a
                 className="action-button"
@@ -257,6 +257,23 @@ export default function HomePage() {
                 <span>{cell.note}</span>
               </article>
             ))}
+          </div>
+
+          <div className="scope-embed">
+            <p className="scope-embed__label">Signal source</p>
+            <div className="spotify-embed-shell">
+              <iframe
+                data-testid="embed-iframe"
+                style={{ borderRadius: "12px" }}
+                src="https://open.spotify.com/embed/album/1dedNPacu6iCzgAblljBCr?utm_source=generator"
+                width="100%"
+                height="152"
+                frameBorder="0"
+                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                loading="lazy"
+                title="ROOM signal source Spotify embed"
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -393,18 +410,20 @@ export default function HomePage() {
         </article>
 
         <article className="panel panel--newsletter">
-          <div className="section-heading">
-            <p className="eyebrow">Newsletter sign up</p>
-            <h2>Take the external page for the newsletter.</h2>
-          </div>
-          <p className="panel-note">
-            The signup lives off-site. Follow the link for the external form and
-            join the list there.
-          </p>
-          <div className="panel-links">
-            <LinkChip href={newsletterSignupUrl} dark>
-              Newsletter sign up
-            </LinkChip>
+          <div className="newsletter-embed">
+            <div className="section-heading">
+              <p className="eyebrow">Newsletter sign up</p>
+              <h2>Take the external page for the newsletter.</h2>
+            </div>
+            <p className="panel-note">
+              The signup lives off-site. Follow the link for the external form
+              and join the list there.
+            </p>
+            <div className="panel-links">
+              <LinkChip href={newsletterSignupUrl} dark>
+                Newsletter sign up
+              </LinkChip>
+            </div>
           </div>
         </article>
       </section>
