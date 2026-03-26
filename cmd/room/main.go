@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -58,17 +59,26 @@ func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *c
 }
 
 func newInitCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var initialPrompt string
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize ROOM state in the current repository",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			report, err := svc.Init(ctx, app.InitOptions{WorkingDir: mustWD()})
+			resolvedPrompt, err := resolveInitPrompt(initialPrompt, os.Stdin)
+			if err != nil {
+				return err
+			}
+			report, err := svc.Init(ctx, app.InitOptions{
+				WorkingDir:    mustWD(),
+				InitialPrompt: resolvedPrompt,
+			})
 			if err != nil {
 				return err
 			}
 			return renderInit(report)
 		},
 	}
+	cmd.Flags().StringVar(&initialPrompt, "prompt", "", "seed the initial instruction; use '-' to read from stdin")
 	return cmd
 }
 
@@ -417,15 +427,51 @@ func renderInit(report app.InitReport) error {
 	}
 	for _, line := range report.Lines {
 		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "",
+			strings.HasPrefix(trimmed, "Initialized ROOM in "),
+			strings.HasPrefix(trimmed, "State directory:"),
+			trimmed == "Next steps:",
+			trimmed == "room doctor",
+			trimmed == "room inspect",
+			trimmed == "room run --iterations 5":
+			continue
+		}
 		if strings.HasPrefix(trimmed, "ROOM ignores ") || strings.HasPrefix(trimmed, "Recommendation:") {
 			summary.MissingIgnore = true
 			if summary.IgnoreAdvisory != "" {
 				summary.IgnoreAdvisory += "\n"
 			}
 			summary.IgnoreAdvisory += trimmed
+			continue
 		}
+		summary.Notes = append(summary.Notes, trimmed)
 	}
 	return renderBlock(ui.RenderInit(summary))
+}
+
+func resolveInitPrompt(raw string, stdin io.Reader) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+
+	prompt := raw
+	if raw == "-" {
+		if stdin == nil {
+			return "", errors.New("stdin is not available")
+		}
+		data, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("read initial prompt from stdin: %w", err)
+		}
+		prompt = string(data)
+	}
+
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", errors.New("initial prompt cannot be empty")
+	}
+	return prompt, nil
 }
 
 func renderStatus(report app.StatusReport) error {

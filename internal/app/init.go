@@ -15,7 +15,8 @@ import (
 )
 
 type InitOptions struct {
-	WorkingDir string
+	WorkingDir    string
+	InitialPrompt string
 }
 
 type InitReport struct {
@@ -44,10 +45,18 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 			return InitReport{}, err
 		}
 	}
+	seedInstruction := prompt.DefaultSeedInstruction()
+	customPrompt := strings.TrimSpace(opts.InitialPrompt)
+	if customPrompt != "" {
+		seedInstruction = customPrompt
+	}
+
+	wroteInstruction := false
 	if !fsutil.FileExists(paths.InstructionPath) {
-		if err := fsutil.AtomicWriteFile(paths.InstructionPath, []byte(prompt.DefaultSeedInstruction()+"\n"), 0o644); err != nil {
+		if err := fsutil.AtomicWriteFile(paths.InstructionPath, []byte(seedInstruction+"\n"), 0o644); err != nil {
 			return InitReport{}, err
 		}
+		wroteInstruction = true
 	}
 	if !fsutil.FileExists(paths.SchemaPath) {
 		if err := agent.WriteSchema(paths.SchemaPath); err != nil {
@@ -80,6 +89,13 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		"  room doctor",
 		"  room inspect",
 		"  room run --iterations 5",
+	}
+	if customPrompt != "" {
+		if wroteInstruction {
+			lines = append(lines, "Seeded instruction.txt from the provided initial prompt.")
+		} else {
+			lines = append(lines, "Instruction file already exists; custom prompt was not applied.")
+		}
 	}
 	if missingIgnore(repoRoot) {
 		lines = append(lines, "ROOM ignores `.room/` in its own dirty checks, diffs, and commits.")

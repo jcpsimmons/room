@@ -100,6 +100,18 @@ room run --iterations 5
 room status
 ```
 
+To start from a real task instead of the default seed prompt:
+
+```bash
+room init --prompt "Build a deterministic changelog generator for this repo."
+```
+
+Or pipe a longer prompt through stdin:
+
+```bash
+cat prompt.txt | room init --prompt -
+```
+
 Common variants:
 
 ```bash
@@ -134,6 +146,8 @@ Creates `.room/` in the current repository and seeds:
 - `summaries.log`
 - `seen_instructions.txt`
 - `runs/`
+
+Use `room init --prompt "..."` to seed `instruction.txt` with your own starting prompt instead of ROOM's default "make this repository materially better" instruction. Pass `--prompt -` to read the prompt from stdin.
 
 ### `room run`
 

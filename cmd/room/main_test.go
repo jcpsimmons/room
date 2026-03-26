@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jcpsimmons/room/internal/app"
@@ -75,6 +76,28 @@ func TestShouldUseRunUI(t *testing.T) {
 				t.Fatalf("expected ROOM_TUI=%q to enable the TUI", value)
 			}
 		})
+	}
+}
+
+func TestResolveInitPrompt(t *testing.T) {
+	got, err := resolveInitPrompt("Build a release bot", nil)
+	if err != nil {
+		t.Fatalf("resolveInitPrompt direct: %v", err)
+	}
+	if got != "Build a release bot" {
+		t.Fatalf("prompt = %q", got)
+	}
+
+	got, err = resolveInitPrompt("-", strings.NewReader("  Ship an API client.  \n"))
+	if err != nil {
+		t.Fatalf("resolveInitPrompt stdin: %v", err)
+	}
+	if got != "Ship an API client." {
+		t.Fatalf("stdin prompt = %q", got)
+	}
+
+	if _, err := resolveInitPrompt("-", strings.NewReader(" \n\t")); err == nil {
+		t.Fatal("expected empty stdin prompt to fail")
 	}
 }
 
