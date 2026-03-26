@@ -767,41 +767,6 @@ func (m RunModel) renderFluxPanel(width, height int) string {
 	return renderPanel("FLUX", body, accentViolet, width, height)
 }
 
-func (m RunModel) renderParamsPanel(width, height int) string {
-	provider := m.provider
-	if provider == "" {
-		provider = "—"
-	}
-	model := m.model
-	if model == "" {
-		model = "default"
-	}
-	repo := m.repoRoot
-	if repo == "" {
-		repo = "—"
-	}
-	commitMode := "off"
-	if m.commitEnabled {
-		commitMode = "on"
-	}
-	dryRun := "no"
-	if m.dryRun {
-		dryRun = "yes"
-	}
-
-	lines := []string{
-		kvLine("source", strings.ToUpper(provider), accentCyan),
-		kvLine("voice", model, accentPink),
-		kvLine("patch", repo, accentViolet),
-		kvLine("steps", fmt.Sprintf("%d", m.total), accentGold),
-		kvLine("record", commitMode, accentLime),
-		kvLine("monitor", dryRun, accentOrange),
-	}
-
-	body := strings.Join(lines, "\n")
-	return renderPanel("PATCH BAY", body, accentOrange, width, height)
-}
-
 func clampInt(v, lo, hi int) int {
 	if v < lo {
 		return lo
