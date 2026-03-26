@@ -1,6 +1,6 @@
 import { RunCounter } from "@/components/RunCounter";
 
-const newsletterSignupUrl = "https://drjoshcsimmons.kit.com/f831154932";
+const newsletterSignupUrl = "https://drjoshcsimmons.kit.com/";
 
 const navItems = [
   { href: "#signal", label: "Signal Path" },
