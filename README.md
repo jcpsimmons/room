@@ -172,6 +172,10 @@ Each iteration:
 
 Prints the exact prompt body ROOM would send next.
 
+### `room config`
+
+Prints the resolved ROOM configuration, including the effective provider settings and the paths ROOM will use for its state files.
+
 ### `room tail`
 
 Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured result, and diff stats without making you open the artifact directory by hand.

@@ -53,6 +53,7 @@ func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *c
 	root.AddCommand(newStatusCommand(ctx, svc))
 	root.AddCommand(newDoctorCommand(ctx, svc))
 	root.AddCommand(newInspectCommand(ctx, svc))
+	root.AddCommand(newConfigCommand(ctx, svc))
 	root.AddCommand(newTailCommand(ctx, svc))
 	root.AddCommand(newVersionCommand(info))
 
@@ -198,6 +199,31 @@ func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
 	cmd.Flags().StringVar(&instructionFile, "instruction-file", "", "override the instruction file path")
+	return cmd
+}
+
+func newConfigCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Show the resolved ROOM configuration",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Config(ctx, app.ConfigOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+			})
+			if asJSON {
+				return printJSON(report, err)
+			}
+			if err != nil {
+				return err
+			}
+			return renderLines(report.Lines)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
 	return cmd
 }
 
