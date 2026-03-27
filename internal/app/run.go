@@ -62,6 +62,7 @@ type RunProgressEvent struct {
 	RunDir              string           `json:"run_dir"`
 	PromptPath          string           `json:"prompt_path"`
 	Status              string           `json:"status"`
+	StoppedOnDone       bool             `json:"stopped_on_done"`
 	Summary             string           `json:"summary"`
 	NextInstruction     string           `json:"next_instruction"`
 	CommitMessage       string           `json:"commit_message"`
@@ -80,6 +81,7 @@ type RunReport struct {
 	CompletedIterations int      `json:"completed_iterations"`
 	Failures            int      `json:"failures"`
 	LastStatus          string   `json:"last_status"`
+	StoppedOnDone       bool     `json:"stopped_on_done"`
 	LastRunDir          string   `json:"last_run_dir"`
 	Lines               []string `json:"lines"`
 }
@@ -136,6 +138,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			Failures:            report.Failures,
 			RunDir:              report.LastRunDir,
 			Status:              report.LastStatus,
+			StoppedOnDone:       report.StoppedOnDone,
 			DryRun:              opts.DryRun,
 			CommitEnabled:       commitEnabled,
 			Err:                 err,
@@ -199,6 +202,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 
 	failures := 0
 	completed := 0
+	stoppedOnDone := false
 	for completed < opts.Iterations || opts.UntilDone {
 		if ctx.Err() != nil {
 			snapshot.LastStatus = "interrupted"
@@ -520,6 +524,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		report.CompletedIterations = completed
 		report.Failures = failures
 		report.LastStatus = statusValue
+		report.StoppedOnDone = false
 		report.LastRunDir = runDir
 		emitRunProgress(progress, RunProgressEvent{
 			Phase:               RunProgressPhaseIterationSuccess,
@@ -542,7 +547,9 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			Duration:            finishedAt.Sub(startedAt),
 		})
 
-		if statusValue == "done" {
+		if statusValue == "done" && opts.UntilDone {
+			stoppedOnDone = true
+			report.StoppedOnDone = true
 			lines = append(lines, "Agent reported done. Stopping.")
 			break
 		}
@@ -558,6 +565,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		CompletedIterations: completed,
 		Failures:            failures,
 		LastStatus:          snapshot.LastStatus,
+		StoppedOnDone:       stoppedOnDone,
 		LastRunDir:          snapshot.LastRunDirectory,
 		Lines:               lines,
 	}, nil

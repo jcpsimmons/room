@@ -455,6 +455,9 @@ func TestRunEmitsProgressEventsOnSuccess(t *testing.T) {
 	if events[4].Status != "continue" || events[4].Err != nil {
 		t.Fatalf("finish event = %#v", events[4])
 	}
+	if events[4].StoppedOnDone {
+		t.Fatalf("finish event should not mark stop-on-done: %#v", events[4])
+	}
 }
 
 func TestRunEmitsProgressEventsOnFailure(t *testing.T) {
@@ -545,8 +548,9 @@ func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
 	})
 
 	report, err := svc.Run(context.Background(), RunOptions{
-		WorkingDir: repoRoot,
-		UntilDone:  true,
+		WorkingDir:   repoRoot,
+		UntilDone:    true,
+		UntilDoneSet: true,
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -556,6 +560,9 @@ func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
 	}
 	if report.LastStatus != "done" {
 		t.Fatalf("last status = %q", report.LastStatus)
+	}
+	if !report.StoppedOnDone {
+		t.Fatalf("expected stop-on-done report flag")
 	}
 	if len(fakeGit.commitMessages) != 0 {
 		t.Fatalf("expected no commits, got %#v", fakeGit.commitMessages)
@@ -567,6 +574,63 @@ func TestRunStopsOnDoneWithoutChanges(t *testing.T) {
 	}
 	if snapshot.ConsecutiveNoChange != 1 {
 		t.Fatalf("consecutive no change = %d", snapshot.ConsecutiveNoChange)
+	}
+}
+
+func TestRunContinuesPastDoneWhenIterationsRemain(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{
+			{
+				result: agent.Result{
+					Summary:         "Thought the loop was complete early",
+					NextInstruction: "If anything remains, keep pushing on weak spots.",
+					Status:          "done",
+					CommitMessage:   "record checkpoint",
+				},
+			},
+			{
+				result: agent.Result{
+					Summary:         "Found one more worthwhile cleanup",
+					NextInstruction: "Tighten any remaining rough edges.",
+					Status:          "continue",
+					CommitMessage:   "tighten rough edges",
+				},
+			},
+		},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"", "diff --git a/file b/file"},
+		statsSeq:     []git.DiffStats{{}, {Files: 1, Added: 2, Deleted: 1}},
+		commitHashes: []string{"abc123"},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 2,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 2 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	if report.LastStatus != "continue" {
+		t.Fatalf("last status = %q", report.LastStatus)
+	}
+	if report.StoppedOnDone {
+		t.Fatalf("did not expect stop-on-done report flag")
 	}
 }
 

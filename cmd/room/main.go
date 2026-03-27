@@ -478,7 +478,7 @@ func formatRunProgress(event app.RunProgressEvent) []string {
 			}
 			return []string{fmt.Sprintf("Run halted: %s", event.Err.Error())}
 		}
-		if event.Status == "done" {
+		if event.StoppedOnDone {
 			return []string{"Agent reported done. Stopping."}
 		}
 		return nil
