@@ -55,6 +55,7 @@ func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *c
 	root.AddCommand(newDoctorCommand(ctx, svc))
 	root.AddCommand(newInspectCommand(ctx, svc))
 	root.AddCommand(newConfigCommand(ctx, svc))
+	root.AddCommand(newBundleCommand(ctx, svc))
 	root.AddCommand(newTailCommand(ctx, svc))
 	root.AddCommand(newPruneCommand(ctx, svc))
 	root.AddCommand(newVersionCommand(info))
@@ -224,6 +225,34 @@ func newConfigCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	return cmd
+}
+
+func newBundleCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var runDir string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "bundle",
+		Short: "Inspect a ROOM run bundle",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Bundle(ctx, app.BundleOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+				RunDir:     runDir,
+			})
+			if asJSON {
+				return printJSON(report, err)
+			}
+			if err != nil {
+				return err
+			}
+			return renderLines(report.Lines)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().StringVar(&runDir, "run-dir", "", "inspect a specific bundle directory instead of the newest one")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
 	return cmd
 }

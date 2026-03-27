@@ -17,12 +17,12 @@ import (
 type bundleMode string
 
 const (
-	bundleModeDryRun   bundleMode = "dry_run"
+	bundleModeDryRun    bundleMode = "dry_run"
 	bundleModeExecuted  bundleMode = "executed"
 	bundleModeLegacy    bundleMode = "legacy"
-	bundleIntegrityOK   = "verified"
-	bundleIntegrityWarn = "unverified"
-	bundleIntegrityBad  = "mismatch"
+	bundleIntegrityOK              = "verified"
+	bundleIntegrityWarn            = "unverified"
+	bundleIntegrityBad             = "mismatch"
 )
 
 type bundleArtifact struct {
@@ -32,9 +32,9 @@ type bundleArtifact struct {
 }
 
 type bundleManifest struct {
-	RunDir    string          `json:"run_dir"`
-	Mode      bundleMode      `json:"mode"`
-	CreatedAt time.Time       `json:"created_at"`
+	RunDir    string           `json:"run_dir"`
+	Mode      bundleMode       `json:"mode"`
+	CreatedAt time.Time        `json:"created_at"`
 	Artifacts []bundleArtifact `json:"artifacts"`
 }
 
@@ -101,24 +101,38 @@ func assessNewestBundle(runsDir string) (bundleAssessment, error) {
 		}
 		return bundleAssessment{}, err
 	}
+	return assessBundleNamed(latestRunDir, "newest bundle")
+}
+
+func assessBundle(runDir string) (bundleAssessment, error) {
+	return assessBundleNamed(runDir, "bundle")
+}
+
+func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
+	if runDir == "" {
+		return bundleAssessment{}, nil
+	}
+	if !fsutil.DirExists(runDir) {
+		return bundleAssessment{}, fmt.Errorf("%s directory not found: %s", subject, runDir)
+	}
 
 	assessment := bundleAssessment{
-		RunDir:    latestRunDir,
+		RunDir:    runDir,
 		Mode:      bundleModeLegacy,
 		Integrity: bundleIntegrityWarn,
 	}
 
-	manifest, ok, err := readBundleManifest(latestRunDir)
+	manifest, ok, err := readBundleManifest(runDir)
 	if err != nil {
 		assessment.Integrity = bundleIntegrityBad
-		assessment.Hint = fmt.Sprintf("Hint: newest bundle %s has an unreadable manifest: %v.", filepath.Base(latestRunDir), err)
+		assessment.Hint = fmt.Sprintf("Hint: %s %s has an unreadable manifest: %v.", subject, filepath.Base(runDir), err)
 		return assessment, nil
 	}
 	if !ok {
-		missing := missingBundleArtifacts(latestRunDir, bundleModeExecuted)
+		missing := missingBundleArtifacts(runDir, bundleModeExecuted)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityWarn
-			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is incomplete; missing %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 		}
 		return assessment, nil
 	}
@@ -126,31 +140,31 @@ func assessNewestBundle(runsDir string) (bundleAssessment, error) {
 	assessment.Mode = manifest.Mode
 	switch manifest.Mode {
 	case bundleModeDryRun:
-		missing := missingBundleArtifacts(latestRunDir, bundleModeDryRun)
+		missing := missingBundleArtifacts(runDir, bundleModeDryRun)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityBad
-			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is missing dry-run prompt artifact(s): %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+			assessment.Hint = fmt.Sprintf("Hint: %s %s is missing dry-run prompt artifact(s): %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 			return assessment, nil
 		}
 	case bundleModeExecuted, bundleModeLegacy:
-		missing := missingBundleArtifacts(latestRunDir, bundleModeExecuted)
+		missing := missingBundleArtifacts(runDir, bundleModeExecuted)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityWarn
-			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is incomplete; missing %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 			return assessment, nil
 		}
 	default:
-		missing := missingBundleArtifacts(latestRunDir, bundleModeExecuted)
+		missing := missingBundleArtifacts(runDir, bundleModeExecuted)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityWarn
-			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is incomplete; missing %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 			return assessment, nil
 		}
 	}
 
-	if err := verifyBundleManifest(latestRunDir, manifest); err != nil {
+	if err := verifyBundleManifest(runDir, manifest); err != nil {
 		assessment.Integrity = bundleIntegrityBad
-		assessment.Hint = fmt.Sprintf("Hint: newest bundle %s failed integrity check: %v.", filepath.Base(latestRunDir), err)
+		assessment.Hint = fmt.Sprintf("Hint: %s %s failed integrity check: %v.", subject, filepath.Base(runDir), err)
 		return assessment, nil
 	}
 
@@ -180,7 +194,7 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) error {
 		}
 	}
 
-	for _, name := range expectedBundleArtifacts(manifest.Mode) {
+	for _, name := range expectedManifestArtifacts(manifest.Mode) {
 		if _, ok := seen[name]; !ok {
 			return fmt.Errorf("%s missing from manifest", name)
 		}
@@ -191,7 +205,7 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) error {
 
 func missingBundleArtifacts(runDir string, mode bundleMode) []string {
 	missing := make([]string, 0, 3)
-	for _, name := range expectedBundleArtifacts(mode) {
+	for _, name := range expectedRunArtifacts(mode) {
 		if !fsutil.FileExists(filepath.Join(runDir, name)) {
 			missing = append(missing, name)
 		}
@@ -199,7 +213,16 @@ func missingBundleArtifacts(runDir string, mode bundleMode) []string {
 	return missing
 }
 
-func expectedBundleArtifacts(mode bundleMode) []string {
+func expectedRunArtifacts(mode bundleMode) []string {
+	switch mode {
+	case bundleModeDryRun:
+		return []string{"prompt.txt"}
+	default:
+		return []string{"result.json", "diff.patch"}
+	}
+}
+
+func expectedManifestArtifacts(mode bundleMode) []string {
 	switch mode {
 	case bundleModeDryRun:
 		return []string{"prompt.txt"}

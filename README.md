@@ -100,6 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/jcpsimmons/room/main/scripts/instal
 room init
 room doctor
 room inspect
+room bundle
 	room tail
 	room run --iterations 5
 	room status
@@ -179,6 +180,10 @@ Prints the resolved ROOM configuration, including the effective provider setting
 ### `room tail`
 
 Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured result, and diff stats without making you open the artifact directory by hand.
+
+### `room bundle`
+
+Inspects a run bundle directly, verifies any stored manifest, and prints the artifact inventory so archived runs can be audited without spelunking the bundle directory.
 
 ### `room prune`
 
