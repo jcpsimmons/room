@@ -23,6 +23,8 @@ type StatusOptions struct {
 type StatusReport struct {
 	RepoRoot                   string                `json:"repo_root"`
 	Provider                   string                `json:"provider"`
+	ProviderAuthStatus         string                `json:"provider_auth_status,omitempty"`
+	ProviderAuthDrift          string                `json:"provider_auth_drift,omitempty"`
 	State                      state.Snapshot        `json:"state"`
 	CurrentInstruction         string                `json:"current_instruction"`
 	RecentSummaries            []logs.SummaryEntry   `json:"recent_summaries"`
@@ -93,6 +95,11 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		instructionHint = "Current instruction unavailable: missing instruction.txt."
 		currentInstruction = instructionHint
 	}
+	providerDiag := s.providerDiagnostics(ctx, cfg)
+	lastRunLine := fmt.Sprintf("Last run: %s", formatTime(snapshot.LastRunAt))
+	if providerDiag.AuthDriftInline != "" {
+		lastRunLine = fmt.Sprintf("%s (%s)", lastRunLine, providerDiag.AuthDriftInline)
+	}
 
 	var commitLines []string
 	for _, commit := range commits {
@@ -106,7 +113,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		fmt.Sprintf("Repo: %s", repoRoot),
 		fmt.Sprintf("Provider: %s", agent.DisplayName(cfg.Agent.Provider)),
 		fmt.Sprintf("Iteration: %d", snapshot.CurrentIteration),
-		fmt.Sprintf("Last run: %s", formatTime(snapshot.LastRunAt)),
+		lastRunLine,
 		fmt.Sprintf("Last status: %s", snapshot.LastStatus),
 		fmt.Sprintf("Dirty worktree: %t", dirty),
 	}
@@ -163,6 +170,8 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	return StatusReport{
 		RepoRoot:                   repoRoot,
 		Provider:                   agent.NormalizeProvider(cfg.Agent.Provider),
+		ProviderAuthStatus:         providerDiag.AuthStatus,
+		ProviderAuthDrift:          providerDiag.AuthDriftInline,
 		State:                      snapshot,
 		CurrentInstruction:         currentInstruction,
 		RecentSummaries:            summaries,

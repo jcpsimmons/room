@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -310,6 +311,73 @@ func TestStatusSurfacesLastFailureContext(t *testing.T) {
 			t.Fatalf("status lines missing %q:\n%s", want, joined)
 		}
 	}
+}
+
+func TestStatusSurfacesProviderAuthDriftBesideLastRun(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	originalLookPath := lookPath
+	originalExecCommandContext := execCommandContext
+	t.Cleanup(func() {
+		lookPath = originalLookPath
+		execCommandContext = originalExecCommandContext
+	})
+
+	lookPath = func(binary string) (string, error) {
+		if binary != "codex" {
+			t.Fatalf("unexpected binary lookup: %s", binary)
+		}
+		return "/opt/room/bin/codex", nil
+	}
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmdArgs := []string{"-test.run=TestStatusProviderAuthHelperProcess", "--", name}
+		cmdArgs = append(cmdArgs, args...)
+		cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		return cmd
+	}
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.LastRunAt = time.Date(2026, 3, 27, 9, 45, 0, 0, time.UTC)
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       gitClientForTailTest{},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.ProviderAuthDrift == "" {
+		t.Fatal("expected provider auth drift")
+	}
+	if !strings.Contains(report.ProviderAuthDrift, "Codex auth drift: login status failed") {
+		t.Fatalf("provider auth drift = %q", report.ProviderAuthDrift)
+	}
+	if report.ProviderAuthStatus == "" {
+		t.Fatal("expected provider auth status")
+	}
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "Last run: 2026-03-27T09:45:00Z (Codex auth drift: login status failed; authenticate separately before running ROOM)") {
+		t.Fatalf("status lines missing inline auth drift:\n%s", joined)
+	}
+}
+
+func TestStatusProviderAuthHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	os.Exit(1)
 }
 
 func TestStatusSurfacesMalformedRunLockHint(t *testing.T) {

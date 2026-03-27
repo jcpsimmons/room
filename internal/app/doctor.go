@@ -19,6 +19,7 @@ import (
 )
 
 var lookPath = exec.LookPath
+var execCommandContext = exec.CommandContext
 
 type DoctorOptions struct {
 	WorkingDir string
@@ -36,6 +37,12 @@ type DoctorReport struct {
 	Checks            []DoctorCheck `json:"checks"`
 	Lines             []string      `json:"lines"`
 	PromptHistoryHint string        `json:"prompt_history_hint,omitempty"`
+}
+
+type providerDiagnostics struct {
+	Checks          []DoctorCheck
+	AuthStatus      string
+	AuthDriftInline string
 }
 
 func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport, error) {
@@ -77,56 +84,7 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		cfg = config.Default()
 	}
 
-	provider := agent.NormalizeProvider(cfg.Agent.Provider)
-	binary := s.binaryForProvider(cfg)
-	displayName := agent.DisplayName(provider)
-	checks = append(checks, DoctorCheck{Name: "provider_binary", OK: true, Message: fmt.Sprintf("configured %s binary: %s", strings.ToLower(displayName), binary)})
-
-	runner, runnerErr := s.runnerForProvider(provider)
-	if runnerErr != nil {
-		checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: runnerErr.Error()})
-	} else {
-		resolvedBinary, err := lookPath(binary)
-		if err != nil {
-			checks = append(checks, DoctorCheck{Name: "provider_path", OK: false, Message: fmt.Sprintf("PATH search for %s failed: %v", binary, err)})
-			checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: fmt.Sprintf("%s binary not found on PATH: %s", displayName, binary)})
-		} else {
-			checks = append(checks, DoctorCheck{Name: "provider_path", OK: true, Message: fmt.Sprintf("PATH search resolved %s to %s", binary, resolvedBinary)})
-			versionText, versionErr := runner.Version(ctx, resolvedBinary)
-			if versionErr != nil {
-				checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: versionErr.Error()})
-			} else {
-				checks = append(checks, DoctorCheck{Name: "provider", OK: true, Message: fmt.Sprintf("%s available: %s", displayName, versionText)})
-				switch provider {
-				case agent.ProviderClaude:
-					if err := claude.ValidateCLI(ctx, binary); err != nil {
-						checks = append(checks, DoctorCheck{Name: "provider_capabilities", OK: false, Message: err.Error()})
-					} else {
-						checks = append(checks, DoctorCheck{Name: "provider_capabilities", OK: true, Message: "Claude Code CLI supports ROOM's required non-interactive flags"})
-					}
-				default:
-					if err := codex.ValidateVersion(versionText); err != nil {
-						checks = append(checks, DoctorCheck{Name: "provider_version", OK: false, Message: err.Error()})
-					} else {
-						checks = append(checks, DoctorCheck{Name: "provider_version", OK: true, Message: fmt.Sprintf("Codex version is supported (requires %s or newer)", codex.MinimumSupportedVersion())})
-					}
-				}
-			}
-
-			authArgs := []string{"login", "status"}
-			authFailure := "login status failed; authenticate separately before running ROOM"
-			if provider == agent.ProviderClaude {
-				authArgs = []string{"auth", "status", "--text"}
-				authFailure = "auth status failed; authenticate separately before running ROOM"
-			}
-			statusOut, statusErr := exec.CommandContext(ctx, resolvedBinary, authArgs...).CombinedOutput()
-			if statusErr != nil {
-				checks = append(checks, DoctorCheck{Name: "auth", OK: false, Message: fmt.Sprintf("%s %s", displayName, authFailure)})
-			} else {
-				checks = append(checks, DoctorCheck{Name: "auth", OK: true, Message: strings.TrimSpace(string(statusOut))})
-			}
-		}
-	}
+	checks = append(checks, s.providerDiagnostics(ctx, cfg).Checks...)
 
 	checks = append(checks, DoctorCheck{Name: "jq", OK: true, Message: "jq is not required for ROOM v1"})
 
@@ -273,4 +231,73 @@ func gitInfoExcludeProtectsRoom(repoRoot string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (s *Service) providerDiagnostics(ctx context.Context, cfg config.Config) providerDiagnostics {
+	provider := agent.NormalizeProvider(cfg.Agent.Provider)
+	binary := s.binaryForProvider(cfg)
+	displayName := agent.DisplayName(provider)
+
+	diag := providerDiagnostics{
+		Checks: []DoctorCheck{
+			{Name: "provider_binary", OK: true, Message: fmt.Sprintf("configured %s binary: %s", strings.ToLower(displayName), binary)},
+		},
+	}
+
+	runner, runnerErr := s.runnerForProvider(provider)
+	if runnerErr != nil {
+		diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider", OK: false, Message: runnerErr.Error()})
+		return diag
+	}
+
+	resolvedBinary, err := lookPath(binary)
+	if err != nil {
+		diag.Checks = append(diag.Checks,
+			DoctorCheck{Name: "provider_path", OK: false, Message: fmt.Sprintf("PATH search for %s failed: %v", binary, err)},
+			DoctorCheck{Name: "provider", OK: false, Message: fmt.Sprintf("%s binary not found on PATH: %s", displayName, binary)},
+		)
+		return diag
+	}
+
+	diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_path", OK: true, Message: fmt.Sprintf("PATH search resolved %s to %s", binary, resolvedBinary)})
+	versionText, versionErr := runner.Version(ctx, resolvedBinary)
+	if versionErr != nil {
+		diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider", OK: false, Message: versionErr.Error()})
+		return diag
+	}
+
+	diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider", OK: true, Message: fmt.Sprintf("%s available: %s", displayName, versionText)})
+	switch provider {
+	case agent.ProviderClaude:
+		if err := claude.ValidateCLI(ctx, binary); err != nil {
+			diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_capabilities", OK: false, Message: err.Error()})
+		} else {
+			diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_capabilities", OK: true, Message: "Claude Code CLI supports ROOM's required non-interactive flags"})
+		}
+	default:
+		if err := codex.ValidateVersion(versionText); err != nil {
+			diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_version", OK: false, Message: err.Error()})
+		} else {
+			diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_version", OK: true, Message: fmt.Sprintf("Codex version is supported (requires %s or newer)", codex.MinimumSupportedVersion())})
+		}
+	}
+
+	authArgs := []string{"login", "status"}
+	authFailure := "login status failed; authenticate separately before running ROOM"
+	if provider == agent.ProviderClaude {
+		authArgs = []string{"auth", "status", "--text"}
+		authFailure = "auth status failed; authenticate separately before running ROOM"
+	}
+
+	statusOut, statusErr := execCommandContext(ctx, resolvedBinary, authArgs...).CombinedOutput()
+	if statusErr != nil {
+		diag.AuthStatus = fmt.Sprintf("%s %s", displayName, authFailure)
+		diag.AuthDriftInline = fmt.Sprintf("%s auth drift: %s", displayName, authFailure)
+		diag.Checks = append(diag.Checks, DoctorCheck{Name: "auth", OK: false, Message: diag.AuthStatus})
+		return diag
+	}
+
+	diag.AuthStatus = strings.TrimSpace(string(statusOut))
+	diag.Checks = append(diag.Checks, DoctorCheck{Name: "auth", OK: true, Message: diag.AuthStatus})
+	return diag
 }
