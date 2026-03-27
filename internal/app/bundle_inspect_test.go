@@ -126,6 +126,16 @@ func TestBundleExplainsMissingArtifacts(t *testing.T) {
 	if !strings.Contains(report.BundleHint, "missing result.json and diff.patch") {
 		t.Fatalf("bundle hint = %q", report.BundleHint)
 	}
+	if len(report.BundleIntegrityHints) != 2 {
+		t.Fatalf("bundle integrity hints = %#v", report.BundleIntegrityHints)
+	}
+	if report.BundleIntegrityHints[0].Code != bundleIntegrityHintRunArtifactMissing || report.BundleIntegrityHints[1].Code != bundleIntegrityHintRunArtifactMissing {
+		t.Fatalf("bundle integrity hint codes = %#v", report.BundleIntegrityHints)
+	}
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "Bundle integrity hints:") {
+		t.Fatalf("bundle lines missing integrity hints:\n%s", joined)
+	}
 }
 
 var _ git.Client = gitClientForTailTest{}

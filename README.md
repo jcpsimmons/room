@@ -183,7 +183,7 @@ Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured resu
 
 ### `room bundle`
 
-Inspects a run bundle directly, verifies any stored manifest, and prints the artifact inventory so archived runs can be audited without spelunking the bundle directory.
+Inspects a run bundle directly, verifies any stored manifest, and prints the artifact inventory plus any integrity hints so archived runs can be audited without spelunking the bundle directory.
 
 ### `room prune`
 

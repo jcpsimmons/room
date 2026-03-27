@@ -21,16 +21,17 @@ type BundleArtifactReport struct {
 }
 
 type BundleReport struct {
-	RepoRoot        string                 `json:"repo_root"`
-	RunsDir         string                 `json:"runs_dir"`
-	RunDir          string                 `json:"run_dir"`
-	BundleMode      string                 `json:"bundle_mode,omitempty"`
-	BundleIntegrity string                 `json:"bundle_integrity,omitempty"`
-	BundleHint      string                 `json:"bundle_hint,omitempty"`
-	Execution       *ExecutionReport       `json:"execution,omitempty"`
-	ManifestOK      bool                   `json:"manifest_ok"`
-	Artifacts       []BundleArtifactReport `json:"artifacts,omitempty"`
-	Lines           []string               `json:"lines"`
+	RepoRoot             string                 `json:"repo_root"`
+	RunsDir              string                 `json:"runs_dir"`
+	RunDir               string                 `json:"run_dir"`
+	BundleMode           string                 `json:"bundle_mode,omitempty"`
+	BundleIntegrity      string                 `json:"bundle_integrity,omitempty"`
+	BundleHint           string                 `json:"bundle_hint,omitempty"`
+	BundleIntegrityHints []BundleIntegrityHint  `json:"bundle_integrity_hints,omitempty"`
+	Execution            *ExecutionReport       `json:"execution,omitempty"`
+	ManifestOK           bool                   `json:"manifest_ok"`
+	Artifacts            []BundleArtifactReport `json:"artifacts,omitempty"`
+	Lines                []string               `json:"lines"`
 }
 
 func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport, error) {
@@ -80,14 +81,15 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	}
 
 	report := BundleReport{
-		RepoRoot:        repoRoot,
-		RunsDir:         paths.RunsDir,
-		RunDir:          runDir,
-		BundleMode:      string(assessment.Mode),
-		BundleIntegrity: assessment.Integrity,
-		BundleHint:      assessment.Hint,
-		Execution:       executionReportIfPresent(execution, hasExecution),
-		ManifestOK:      manifestOK && assessment.ManifestOK,
+		RepoRoot:             repoRoot,
+		RunsDir:              paths.RunsDir,
+		RunDir:               runDir,
+		BundleMode:           string(assessment.Mode),
+		BundleIntegrity:      assessment.Integrity,
+		BundleHint:           assessment.Hint,
+		BundleIntegrityHints: assessment.Hints,
+		Execution:            executionReportIfPresent(execution, hasExecution),
+		ManifestOK:           manifestOK && assessment.ManifestOK,
 	}
 
 	if manifestOK {
@@ -114,6 +116,9 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	}
 	if report.BundleHint != "" {
 		lines = append(lines, report.BundleHint)
+	}
+	if len(report.BundleIntegrityHints) > 0 {
+		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(report.BundleIntegrityHints)))
 	}
 	lines = append(lines, executionLines(execution, hasExecution)...)
 	if manifestOK {
