@@ -7,11 +7,12 @@ import (
 )
 
 const (
-	outcomeAmpBoostCap    = 0.22 // max additive cue strength, independent of ambient level
-	outcomeFreqBlendCap   = 0.35 // clamp how much the cue can pull frequency
-	outcomeModFreqBlendCap = 0.35
-	outcomeModDepthBlendCap = 0.45
-	outcomeDetuneBlendCap = 0.55
+	outcomeAmpBlend         = 0.5  // cue signal mix ratio before per-field saturation
+	outcomeAmpBlendCap      = 0.10 // max additive cue strength, independent of ambient level
+	outcomeFreqBlendCap     = 0.25 // clamp how much the cue can pull frequency
+	outcomeModFreqBlendCap  = 0.22
+	outcomeModDepthBlendCap = 0.30
+	outcomeDetuneBlendCap   = 0.40
 )
 
 // audioCue carries a short-lived tone that rides on top of the ambient voices.
@@ -48,10 +49,10 @@ func (c audioCue) audioParams(fallback audio.Params) audio.Params {
 
 	out := c.recipe
 	blend := clamp01(c.energy)
-	outBlend := blend * 0.72 // taper aggressive spike tails
+	outBlend := blend * outcomeAmpBlend
 
 	// Keep the cue as an articulate micro-spike, not a full voice takeover.
-	boost := math.Min(out.Amp*outBlend, outcomeAmpBoostCap)
+	boost := math.Min(out.Amp*outBlend, outcomeAmpBlendCap)
 	outParam := clamp01(fallback.Amp + boost*(1-fallback.Amp))
 
 	return audio.Params{
@@ -95,7 +96,7 @@ func outcomeToneRecipe(ev ProgressEvent) (audio.Params, bool) {
 			ModDepth: 5.5,
 			Detune:   0.12,
 		}, true
-	case ev.Kind == ProgressPivot || ev.Status == "pivot":
+	case ev.Kind == ProgressPivot:
 		return audio.Params{
 			Freq:     196.0,
 			Amp:      0.18,
@@ -103,7 +104,7 @@ func outcomeToneRecipe(ev ProgressEvent) (audio.Params, bool) {
 			ModDepth: 1.35,
 			Detune:   2.2,
 		}, true
-	case ev.Kind == ProgressDone || ev.Status == "done":
+	case ev.Kind == ProgressDone:
 		return audio.Params{
 			Freq:     784.0,
 			Amp:      0.2,
