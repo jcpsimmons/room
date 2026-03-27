@@ -417,3 +417,47 @@ func TestDoctorReportsProviderBinaryResolution(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorTimesOutSlowProviderVersionProbe(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	originalTimeout := providerDiagnosticsTimeout
+	providerDiagnosticsTimeout = 10 * time.Millisecond
+	t.Cleanup(func() {
+		providerDiagnosticsTimeout = originalTimeout
+	})
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{
+			versionFn: func(ctx context.Context, _ string) (string, error) {
+				<-ctx.Done()
+				return "", ctx.Err()
+			},
+		}, nil),
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "provider" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected provider check to fail, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "version probe timed out after 10ms") {
+			t.Fatalf("unexpected provider timeout message: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected provider check, got %#v", report.Checks)
+	}
+}

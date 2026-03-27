@@ -22,10 +22,11 @@ import (
 )
 
 type fakeRunner struct {
-	version string
-	calls   int
-	prompts []string
-	runs    []fakeRun
+	version   string
+	versionFn func(context.Context, string) (string, error)
+	calls     int
+	prompts   []string
+	runs      []fakeRun
 }
 
 type fakeRun struct {
@@ -35,7 +36,10 @@ type fakeRun struct {
 	err    error
 }
 
-func (f *fakeRunner) Version(_ context.Context, _ string) (string, error) {
+func (f *fakeRunner) Version(ctx context.Context, binary string) (string, error) {
+	if f.versionFn != nil {
+		return f.versionFn(ctx, binary)
+	}
 	return f.version, nil
 }
 

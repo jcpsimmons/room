@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/claude"
@@ -20,6 +22,7 @@ import (
 
 var lookPath = exec.LookPath
 var execCommandContext = exec.CommandContext
+var providerDiagnosticsTimeout = 3 * time.Second
 
 type DoctorOptions struct {
 	WorkingDir string
@@ -265,17 +268,24 @@ func (s *Service) providerDiagnostics(ctx context.Context, cfg config.Config) pr
 	}
 
 	diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_path", OK: true, Message: fmt.Sprintf("PATH search resolved %s to %s", binary, resolvedBinary)})
-	versionText, versionErr := runner.Version(ctx, resolvedBinary)
+	versionCtx, cancelVersion := context.WithTimeout(ctx, providerDiagnosticsTimeout)
+	versionText, versionErr := runner.Version(versionCtx, resolvedBinary)
+	versionCtxErr := versionCtx.Err()
+	cancelVersion()
 	if versionErr != nil {
-		diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider", OK: false, Message: versionErr.Error()})
+		diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider", OK: false, Message: providerDiagnosticFailure("version probe", versionErr, versionCtxErr)})
 		return diag
 	}
 
 	diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider", OK: true, Message: fmt.Sprintf("%s available: %s", displayName, versionText)})
 	switch provider {
 	case agent.ProviderClaude:
-		if err := claude.ValidateCLI(ctx, binary); err != nil {
-			diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_capabilities", OK: false, Message: err.Error()})
+		capabilityCtx, cancelCapability := context.WithTimeout(ctx, providerDiagnosticsTimeout)
+		err := claude.ValidateCLI(capabilityCtx, resolvedBinary)
+		capabilityCtxErr := capabilityCtx.Err()
+		cancelCapability()
+		if err != nil {
+			diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_capabilities", OK: false, Message: providerDiagnosticFailure("capability probe", err, capabilityCtxErr)})
 		} else {
 			diag.Checks = append(diag.Checks, DoctorCheck{Name: "provider_capabilities", OK: true, Message: "Claude Code CLI supports ROOM's required non-interactive flags"})
 		}
@@ -294,10 +304,14 @@ func (s *Service) providerDiagnostics(ctx context.Context, cfg config.Config) pr
 		authFailure = "auth status failed; authenticate separately before running ROOM"
 	}
 
-	statusOut, statusErr := execCommandContext(ctx, resolvedBinary, authArgs...).CombinedOutput()
+	authCtx, cancelAuth := context.WithTimeout(ctx, providerDiagnosticsTimeout)
+	statusOut, statusErr := execCommandContext(authCtx, resolvedBinary, authArgs...).CombinedOutput()
+	authCtxErr := authCtx.Err()
+	cancelAuth()
 	if statusErr != nil {
-		diag.AuthStatus = fmt.Sprintf("%s %s", displayName, authFailure)
-		diag.AuthDriftInline = fmt.Sprintf("%s auth drift: %s", displayName, authFailure)
+		message := providerAuthFailure(displayName, authFailure, statusErr, authCtxErr)
+		diag.AuthStatus = message
+		diag.AuthDriftInline = fmt.Sprintf("%s auth drift: %s", displayName, strings.TrimPrefix(message, displayName+" "))
 		diag.Checks = append(diag.Checks, DoctorCheck{Name: "auth", OK: false, Message: diag.AuthStatus})
 		return diag
 	}
@@ -305,4 +319,18 @@ func (s *Service) providerDiagnostics(ctx context.Context, cfg config.Config) pr
 	diag.AuthStatus = strings.TrimSpace(string(statusOut))
 	diag.Checks = append(diag.Checks, DoctorCheck{Name: "auth", OK: true, Message: diag.AuthStatus})
 	return diag
+}
+
+func providerDiagnosticFailure(probe string, err error, ctxErr error) string {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctxErr, context.DeadlineExceeded) {
+		return fmt.Sprintf("%s timed out after %s", probe, providerDiagnosticsTimeout)
+	}
+	return err.Error()
+}
+
+func providerAuthFailure(displayName, fallback string, err error, ctxErr error) string {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctxErr, context.DeadlineExceeded) {
+		return fmt.Sprintf("%s auth status timed out after %s; check the CLI manually before running ROOM", displayName, providerDiagnosticsTimeout)
+	}
+	return fmt.Sprintf("%s %s", displayName, fallback)
 }

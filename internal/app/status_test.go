@@ -380,6 +380,62 @@ func TestStatusProviderAuthHelperProcess(t *testing.T) {
 	os.Exit(1)
 }
 
+func TestStatusSurfacesTimedOutProviderAuthDrift(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	originalLookPath := lookPath
+	originalExecCommandContext := execCommandContext
+	originalTimeout := providerDiagnosticsTimeout
+	t.Cleanup(func() {
+		lookPath = originalLookPath
+		execCommandContext = originalExecCommandContext
+		providerDiagnosticsTimeout = originalTimeout
+	})
+
+	providerDiagnosticsTimeout = 10 * time.Millisecond
+	lookPath = func(binary string) (string, error) {
+		if binary != "codex" {
+			t.Fatalf("unexpected binary lookup: %s", binary)
+		}
+		return "/opt/room/bin/codex", nil
+	}
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "zsh", "-lc", "sleep 5")
+	}
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.LastRunAt = time.Date(2026, 3, 27, 9, 45, 0, 0, time.UTC)
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       gitClientForTailTest{},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if !strings.Contains(report.ProviderAuthStatus, "Codex auth status timed out after 10ms") {
+		t.Fatalf("provider auth status = %q", report.ProviderAuthStatus)
+	}
+	if !strings.Contains(report.ProviderAuthDrift, "Codex auth drift: auth status timed out after 10ms") {
+		t.Fatalf("provider auth drift = %q", report.ProviderAuthDrift)
+	}
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "Last run: 2026-03-27T09:45:00Z (Codex auth drift: auth status timed out after 10ms; check the CLI manually before running ROOM)") {
+		t.Fatalf("status lines missing timed-out inline auth drift:\n%s", joined)
+	}
+}
+
 func TestStatusSurfacesMalformedRunLockHint(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)
