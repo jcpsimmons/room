@@ -46,6 +46,34 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return syncParentDir(path)
 }
 
+func AtomicWriteFileExclusive(path string, data []byte, perm os.FileMode) error {
+	if err := EnsureDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+
+	cleanup := func(inErr error) error {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return inErr
+	}
+
+	if _, err := f.Write(data); err != nil {
+		return cleanup(err)
+	}
+	if err := f.Sync(); err != nil {
+		return cleanup(err)
+	}
+	if err := f.Close(); err != nil {
+		return cleanup(err)
+	}
+	return syncParentDir(path)
+}
+
 func FileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
