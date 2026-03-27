@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/state"
 )
@@ -19,20 +20,20 @@ type StatusOptions struct {
 }
 
 type StatusReport struct {
-	RepoRoot           string              `json:"repo_root"`
-	Provider           string              `json:"provider"`
-	State              state.Snapshot      `json:"state"`
-	CurrentInstruction string              `json:"current_instruction"`
-	RecentSummaries    []logs.SummaryEntry `json:"recent_summaries"`
-	RecentCommits      []string            `json:"recent_commits"`
-	LatestRunDir       string              `json:"latest_run_dir,omitempty"`
-	LatestBundleMode   string              `json:"latest_bundle_mode,omitempty"`
-	LatestBundleIntegrity string           `json:"latest_bundle_integrity,omitempty"`
-	LatestBundleHint   string              `json:"latest_bundle_hint,omitempty"`
+	RepoRoot                   string                `json:"repo_root"`
+	Provider                   string                `json:"provider"`
+	State                      state.Snapshot        `json:"state"`
+	CurrentInstruction         string                `json:"current_instruction"`
+	RecentSummaries            []logs.SummaryEntry   `json:"recent_summaries"`
+	RecentCommits              []string              `json:"recent_commits"`
+	LatestRunDir               string                `json:"latest_run_dir,omitempty"`
+	LatestBundleMode           string                `json:"latest_bundle_mode,omitempty"`
+	LatestBundleIntegrity      string                `json:"latest_bundle_integrity,omitempty"`
+	LatestBundleHint           string                `json:"latest_bundle_hint,omitempty"`
 	LatestBundleIntegrityHints []BundleIntegrityHint `json:"latest_bundle_integrity_hints,omitempty"`
-	LatestLockHint     string              `json:"latest_lock_hint,omitempty"`
-	Dirty              bool                `json:"dirty"`
-	Lines              []string            `json:"lines"`
+	LatestLockHint             string                `json:"latest_lock_hint,omitempty"`
+	Dirty                      bool                  `json:"dirty"`
+	Lines                      []string              `json:"lines"`
 }
 
 func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport, error) {
@@ -48,7 +49,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if err != nil {
 		return StatusReport{}, err
 	}
-	instruction, err := os.ReadFile(paths.InstructionPath)
+	instruction, err := fsutil.ReadFileIfExists(paths.InstructionPath)
 	if err != nil {
 		return StatusReport{}, err
 	}
@@ -72,6 +73,12 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	lockHint, err := runLockHint(paths.RoomDir, s.processAlive)
 	if err != nil {
 		return StatusReport{}, err
+	}
+	currentInstruction := strings.TrimSpace(string(instruction))
+	instructionHint := ""
+	if !fsutil.FileExists(paths.InstructionPath) {
+		instructionHint = "Current instruction unavailable: missing instruction.txt."
+		currentInstruction = instructionHint
 	}
 
 	var commitLines []string
@@ -99,9 +106,12 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if lockHint != "" {
 		lines = append(lines, lockHint)
 	}
+	if instructionHint != "" {
+		lines = append(lines, instructionHint)
+	}
 	lines = append(lines,
 		"Current instruction:",
-		indent(strings.TrimSpace(string(instruction))),
+		indent(currentInstruction),
 		"Recent ROOM commits:",
 	)
 	for _, line := range commitLines {
@@ -117,20 +127,20 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	}
 
 	return StatusReport{
-		RepoRoot:           repoRoot,
-		Provider:           agent.NormalizeProvider(cfg.Agent.Provider),
-		State:              snapshot,
-		CurrentInstruction: strings.TrimSpace(string(instruction)),
-		RecentSummaries:    summaries,
-		RecentCommits:      commitLines,
-		LatestRunDir:       latestRunDir,
-		LatestBundleMode:      string(assessment.Mode),
-		LatestBundleIntegrity: assessment.Integrity,
-		LatestBundleHint:      assessment.Hint,
+		RepoRoot:                   repoRoot,
+		Provider:                   agent.NormalizeProvider(cfg.Agent.Provider),
+		State:                      snapshot,
+		CurrentInstruction:         currentInstruction,
+		RecentSummaries:            summaries,
+		RecentCommits:              commitLines,
+		LatestRunDir:               latestRunDir,
+		LatestBundleMode:           string(assessment.Mode),
+		LatestBundleIntegrity:      assessment.Integrity,
+		LatestBundleHint:           assessment.Hint,
 		LatestBundleIntegrityHints: assessment.Hints,
-		LatestLockHint:        lockHint,
-		Dirty:                 dirty,
-		Lines:                 lines,
+		LatestLockHint:             lockHint,
+		Dirty:                      dirty,
+		Lines:                      lines,
 	}, nil
 }
 

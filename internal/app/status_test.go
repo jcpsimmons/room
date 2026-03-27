@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,6 +88,39 @@ diff --git a/a.txt b/a.txt
 	for _, line := range report.Lines {
 		if strings.Contains(line, "Hint: newest bundle") {
 			t.Fatalf("unexpected recovery hint in status lines:\n%s", strings.Join(report.Lines, "\n"))
+		}
+	}
+}
+
+func TestStatusSurvivesMissingInstructionFile(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.Remove(paths.InstructionPath); err != nil {
+		t.Fatalf("remove instruction: %v", err)
+	}
+	writeTailBundle(t, paths.RunsDir, "0001", "newest prompt", nil, "")
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.CurrentInstruction != "Current instruction unavailable: missing instruction.txt." {
+		t.Fatalf("current instruction = %q", report.CurrentInstruction)
+	}
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"Current instruction unavailable: missing instruction.txt.",
+		"Current instruction:",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("status lines missing %q:\n%s", want, joined)
 		}
 	}
 }
