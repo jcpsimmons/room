@@ -527,6 +527,7 @@ func renderStatus(report app.StatusReport) error {
 		Iteration:          report.State.CurrentIteration,
 		LastRun:            formatStatusTime(report.State.LastRunAt),
 		LastStatus:         report.State.LastStatus,
+		RecoveryHint:       report.LatestBundleHint,
 		Dirty:              report.Dirty,
 		CurrentInstruction: report.CurrentInstruction,
 		RecentCommits:      report.RecentCommits,

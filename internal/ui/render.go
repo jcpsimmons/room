@@ -28,6 +28,7 @@ type StatusSummary struct {
 	Iteration          int
 	LastRun            string
 	LastStatus         string
+	RecoveryHint       string
 	Dirty              bool
 	CurrentInstruction string
 	RecentCommits      []string
@@ -81,6 +82,7 @@ func RenderStatus(summary StatusSummary) string {
 		kvLine("last run", summary.LastRun, accentGold),
 		kvLine("dirty", fmt.Sprintf("%t", summary.Dirty), accentRed),
 		kvLine("status", summary.LastStatus, accentViolet),
+		kvLine("recovery", summary.RecoveryHint, accentGold),
 	}, "\n"), accentCyan)
 
 	instruction := framed("INSTRUCTION", summary.CurrentInstruction, accentPink)

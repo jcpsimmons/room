@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +25,8 @@ type StatusReport struct {
 	CurrentInstruction string              `json:"current_instruction"`
 	RecentSummaries    []logs.SummaryEntry `json:"recent_summaries"`
 	RecentCommits      []string            `json:"recent_commits"`
+	LatestRunDir       string              `json:"latest_run_dir,omitempty"`
+	LatestBundleHint   string              `json:"latest_bundle_hint,omitempty"`
 	Dirty              bool                `json:"dirty"`
 	Lines              []string            `json:"lines"`
 }
@@ -57,6 +60,10 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if err != nil {
 		return StatusReport{}, err
 	}
+	latestRunDir, bundleHint, err := newestBundleHint(paths.RunsDir)
+	if err != nil {
+		return StatusReport{}, err
+	}
 
 	var commitLines []string
 	for _, commit := range commits {
@@ -73,10 +80,15 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		fmt.Sprintf("Last run: %s", formatTime(snapshot.LastRunAt)),
 		fmt.Sprintf("Last status: %s", snapshot.LastStatus),
 		fmt.Sprintf("Dirty worktree: %t", dirty),
+	}
+	if bundleHint != "" {
+		lines = append(lines, bundleHint)
+	}
+	lines = append(lines,
 		"Current instruction:",
 		indent(strings.TrimSpace(string(instruction))),
 		"Recent ROOM commits:",
-	}
+	)
 	for _, line := range commitLines {
 		lines = append(lines, indent(line))
 	}
@@ -96,6 +108,8 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		CurrentInstruction: strings.TrimSpace(string(instruction)),
 		RecentSummaries:    summaries,
 		RecentCommits:      commitLines,
+		LatestRunDir:       latestRunDir,
+		LatestBundleHint:   bundleHint,
 		Dirty:              dirty,
 		Lines:              lines,
 	}, nil
@@ -106,4 +120,31 @@ func formatTime(t time.Time) string {
 		return "never"
 	}
 	return t.Format(time.RFC3339)
+}
+
+func newestBundleHint(runsDir string) (string, string, error) {
+	latestRunDir, err := latestRunBundle(runsDir)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "no ROOM run bundles found in ") {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+
+	missing := make([]string, 0, 2)
+	for _, name := range []string{"result.json", "diff.patch"} {
+		if !fileExists(filepath.Join(latestRunDir, name)) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return latestRunDir, "", nil
+	}
+
+	return latestRunDir, fmt.Sprintf("Hint: newest bundle %s is incomplete; missing %s.", filepath.Base(latestRunDir), strings.Join(missing, " and ")), nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
