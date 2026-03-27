@@ -98,8 +98,12 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		}
 	}
 	if missingIgnore(repoRoot) {
-		lines = append(lines, "ROOM ignores `.room/` in its own dirty checks, diffs, and commits.")
-		lines = append(lines, "Recommendation: add `.room/` to `.git/info/exclude` or `.gitignore` if you also want plain `git status` to stay clean.")
+		if wrote, err := ensureRoomIgnored(repoRoot); err == nil && wrote {
+			lines = append(lines, "Added `.room/` to `.git/info/exclude` so plain `git status` stays quiet.")
+		} else {
+			lines = append(lines, "ROOM ignores `.room/` in its own dirty checks, diffs, and commits.")
+			lines = append(lines, "Recommendation: add `.room/` to `.git/info/exclude` or `.gitignore` if you also want plain `git status` to stay clean.")
+		}
 	}
 
 	return InitReport{
@@ -110,10 +114,46 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 }
 
 func missingIgnore(repoRoot string) bool {
-	data, err := os.ReadFile(filepath.Join(repoRoot, ".gitignore"))
-	if err != nil {
-		return true
+	return !roomIgnoreConfigured(repoRoot)
+}
+
+func roomIgnoreConfigured(repoRoot string) bool {
+	for _, path := range []string{
+		filepath.Join(repoRoot, ".gitignore"),
+		filepath.Join(repoRoot, ".git", "info", "exclude"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) == ".room/" {
+				return true
+			}
+		}
 	}
-	text := string(data)
-	return !strings.Contains(text, ".room/")
+	return false
+}
+
+func ensureRoomIgnored(repoRoot string) (bool, error) {
+	if roomIgnoreConfigured(repoRoot) {
+		return false, nil
+	}
+
+	excludePath := filepath.Join(repoRoot, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+
+	trimmed := strings.TrimRight(string(data), "\n")
+	if trimmed != "" {
+		trimmed += "\n"
+	}
+	trimmed += ".room/\n"
+
+	if err := fsutil.AtomicWriteFile(excludePath, []byte(trimmed), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }

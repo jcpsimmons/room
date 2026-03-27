@@ -93,6 +93,41 @@ func TestInitDoesNotOverwriteExistingInstructionWithCustomPrompt(t *testing.T) {
 	}
 }
 
+func TestInitPinsRoomStateIntoGitExclude(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	writeRepoFile(t, filepath.Join(repoRoot, "README.md"), "hello\n")
+	runGit(t, repoRoot, "add", "README.md")
+	runGit(t, repoRoot, "commit", "-m", "init")
+
+	svc := NewService(Dependencies{
+		Git:     git.NewClient(),
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Init(context.Background(), InitOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	excludePath := filepath.Join(repoRoot, ".git", "info", "exclude")
+	excludeData, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	if !strings.Contains(string(excludeData), ".room/") {
+		t.Fatalf("exclude file missing .room/: %q", string(excludeData))
+	}
+
+	if status := runGit(t, repoRoot, "status", "--short", "--untracked-files=all"); status != "" {
+		t.Fatalf("expected clean git status after init, got %q", status)
+	}
+
+	if !containsLine(report.Lines, "Added `.room/` to `.git/info/exclude` so plain `git status` stays quiet.") {
+		t.Fatalf("expected exclude note in report lines: %#v", report.Lines)
+	}
+}
+
 func containsLine(lines []string, want string) bool {
 	for _, line := range lines {
 		if strings.TrimSpace(line) == want {
