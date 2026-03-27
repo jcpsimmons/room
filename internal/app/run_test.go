@@ -577,6 +577,42 @@ func TestRunEmitsProgressEventsOnSuccess(t *testing.T) {
 	if events[4].StoppedOnDone {
 		t.Fatalf("finish event should not mark stop-on-done: %#v", events[4])
 	}
+	if report.DurationMS != 0 {
+		t.Fatalf("report duration_ms = %d", report.DurationMS)
+	}
+}
+
+func TestRunProgressEmitterAddsPhaseTiming(t *testing.T) {
+	var events []RunProgressEvent
+	emitter := newRunProgressEmitter(sequencedClock(
+		time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 3, 25, 12, 0, 0, int(150*time.Millisecond), time.UTC),
+		time.Date(2026, 3, 25, 12, 0, 0, int(450*time.Millisecond), time.UTC),
+		time.Date(2026, 3, 25, 12, 0, 2, int(300*time.Millisecond), time.UTC),
+	), func(event RunProgressEvent) {
+		events = append(events, event)
+	})
+
+	emitter.Emit(RunProgressEvent{Phase: RunProgressPhaseRunStart})
+	emitter.Emit(RunProgressEvent{Phase: RunProgressPhaseIterationStart})
+	emitter.Emit(RunProgressEvent{Phase: RunProgressPhaseAgentExecutionStart})
+	emitter.Emit(RunProgressEvent{Phase: RunProgressPhaseIterationSuccess})
+
+	if len(events) != 4 {
+		t.Fatalf("event count = %d", len(events))
+	}
+	if events[0].PhaseLatencyMS != 0 || events[0].RunElapsedMS != 0 {
+		t.Fatalf("run start timing = %#v", events[0])
+	}
+	if events[1].PhaseLatencyMS != 150 || events[1].RunElapsedMS != 150 {
+		t.Fatalf("iteration start timing = %#v", events[1])
+	}
+	if events[2].PhaseLatencyMS != 300 || events[2].RunElapsedMS != 450 {
+		t.Fatalf("agent execution timing = %#v", events[2])
+	}
+	if events[3].PhaseLatencyMS != 1850 || events[3].RunElapsedMS != 2300 {
+		t.Fatalf("iteration success timing = %#v", events[3])
+	}
 }
 
 func TestRunEmitsProgressEventsOnFailure(t *testing.T) {
@@ -1033,6 +1069,21 @@ func prepareInitializedRepo(t *testing.T, repoRoot string) (config.Config, confi
 func fixedClock() Clock {
 	return func() time.Time {
 		return time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
+	}
+}
+
+func sequencedClock(times ...time.Time) Clock {
+	if len(times) == 0 {
+		return fixedClock()
+	}
+	index := 0
+	return func() time.Time {
+		if index >= len(times) {
+			return times[len(times)-1]
+		}
+		value := times[index]
+		index++
+		return value
 	}
 }
 

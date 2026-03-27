@@ -140,12 +140,18 @@ func TestRunJSONStreamEncoding(t *testing.T) {
 	stream := newJSONLineWriter(&buf)
 
 	stream.Write(makeRunJSONProgressLine(app.RunProgressEvent{
-		Phase:      app.RunProgressPhaseIterationFailure,
-		Iteration:  7,
-		Status:     "failed",
-		Err:        errors.New("malformed output"),
-		StartedAt:  fixedTime(),
-		FinishedAt: fixedTime().Add(2 * time.Second),
+		Phase:           app.RunProgressPhaseIterationFailure,
+		Iteration:       7,
+		Status:          "failed",
+		Err:             errors.New("malformed output"),
+		EventAt:         fixedTime().Add(2500 * time.Millisecond),
+		RunStartedAt:    fixedTime(),
+		RunElapsedMS:    2500,
+		PhaseStartedAt:  fixedTime().Add(500 * time.Millisecond),
+		PhaseFinishedAt: fixedTime().Add(2500 * time.Millisecond),
+		PhaseLatencyMS:  2000,
+		StartedAt:       fixedTime().Add(500 * time.Millisecond),
+		FinishedAt:      fixedTime().Add(2500 * time.Millisecond),
 	}))
 	stream.Write(makeRunJSONResultLine(app.RunReport{
 		RepoRoot:            "/tmp/repo",
@@ -155,6 +161,9 @@ func TestRunJSONStreamEncoding(t *testing.T) {
 		Failures:            1,
 		LastStatus:          "failed",
 		LastRunDir:          "/tmp/repo/.room/runs/0007",
+		StartedAt:           fixedTime(),
+		FinishedAt:          fixedTime().Add(2600 * time.Millisecond),
+		DurationMS:          2600,
 		Lines:               []string{"Iteration 7 failed: malformed output"},
 	}, errors.New("malformed output")))
 
@@ -179,6 +188,12 @@ func TestRunJSONStreamEncoding(t *testing.T) {
 	if progress["error"] != "malformed output" {
 		t.Fatalf("progress error = %v", progress["error"])
 	}
+	if progress["run_elapsed_ms"] != float64(2500) {
+		t.Fatalf("progress run_elapsed_ms = %v", progress["run_elapsed_ms"])
+	}
+	if progress["phase_latency_ms"] != float64(2000) {
+		t.Fatalf("progress phase_latency_ms = %v", progress["phase_latency_ms"])
+	}
 
 	var result map[string]any
 	if err := json.Unmarshal([]byte(lines[1]), &result); err != nil {
@@ -195,6 +210,13 @@ func TestRunJSONStreamEncoding(t *testing.T) {
 	}
 	if result["error"] != "malformed output" {
 		t.Fatalf("result error = %v", result["error"])
+	}
+	resultPayload, ok := result["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result payload = %#v", result["result"])
+	}
+	if resultPayload["duration_ms"] != float64(2600) {
+		t.Fatalf("result duration_ms = %v", resultPayload["duration_ms"])
 	}
 }
 

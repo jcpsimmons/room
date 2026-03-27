@@ -69,21 +69,63 @@ type RunProgressEvent struct {
 	DryRun              bool             `json:"dry_run"`
 	CommitEnabled       bool             `json:"commit_enabled"`
 	Err                 error            `json:"-"`
+	EventAt             time.Time        `json:"event_at,omitempty"`
+	RunStartedAt        time.Time        `json:"run_started_at,omitempty"`
+	RunElapsedMS        int64            `json:"run_elapsed_ms,omitempty"`
+	PhaseStartedAt      time.Time        `json:"phase_started_at,omitempty"`
+	PhaseFinishedAt     time.Time        `json:"phase_finished_at,omitempty"`
+	PhaseLatencyMS      int64            `json:"phase_latency_ms,omitempty"`
 	StartedAt           time.Time        `json:"started_at"`
 	FinishedAt          time.Time        `json:"finished_at"`
 	Duration            time.Duration    `json:"duration"`
 }
 
 type RunReport struct {
-	RepoRoot            string   `json:"repo_root"`
-	Provider            string   `json:"provider"`
-	RequestedIterations int      `json:"requested_iterations"`
-	CompletedIterations int      `json:"completed_iterations"`
-	Failures            int      `json:"failures"`
-	LastStatus          string   `json:"last_status"`
-	StoppedOnDone       bool     `json:"stopped_on_done"`
-	LastRunDir          string   `json:"last_run_dir"`
-	Lines               []string `json:"lines"`
+	RepoRoot            string    `json:"repo_root"`
+	Provider            string    `json:"provider"`
+	RequestedIterations int       `json:"requested_iterations"`
+	CompletedIterations int       `json:"completed_iterations"`
+	Failures            int       `json:"failures"`
+	LastStatus          string    `json:"last_status"`
+	StoppedOnDone       bool      `json:"stopped_on_done"`
+	LastRunDir          string    `json:"last_run_dir"`
+	StartedAt           time.Time `json:"started_at,omitempty"`
+	FinishedAt          time.Time `json:"finished_at,omitempty"`
+	DurationMS          int64     `json:"duration_ms,omitempty"`
+	Lines               []string  `json:"lines"`
+}
+
+type runProgressEmitter struct {
+	now             Clock
+	fn              func(RunProgressEvent)
+	runStartedAt    time.Time
+	previousEventAt time.Time
+}
+
+func newRunProgressEmitter(now Clock, fn func(RunProgressEvent)) *runProgressEmitter {
+	return &runProgressEmitter{now: now, fn: fn}
+}
+
+func (e *runProgressEmitter) Emit(event RunProgressEvent) {
+	if e.fn == nil {
+		return
+	}
+	eventAt := e.now().UTC()
+	if e.runStartedAt.IsZero() {
+		e.runStartedAt = eventAt
+	}
+	phaseStartedAt := e.previousEventAt
+	if phaseStartedAt.IsZero() {
+		phaseStartedAt = eventAt
+	}
+	event.EventAt = eventAt
+	event.RunStartedAt = e.runStartedAt
+	event.RunElapsedMS = eventAt.Sub(e.runStartedAt).Milliseconds()
+	event.PhaseStartedAt = phaseStartedAt
+	event.PhaseFinishedAt = eventAt
+	event.PhaseLatencyMS = eventAt.Sub(phaseStartedAt).Milliseconds()
+	e.previousEventAt = eventAt
+	e.fn(event)
 }
 
 func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, err error) {
@@ -128,8 +170,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		RequestedIterations: opts.Iterations,
 	}
 	progress := opts.Progress
+	emitter := newRunProgressEmitter(s.now, progress)
+	runStartedAt := s.now().UTC()
 	defer func() {
-		emitRunProgress(progress, RunProgressEvent{
+		finishedAt := s.now().UTC()
+		report.StartedAt = runStartedAt
+		report.FinishedAt = finishedAt
+		report.DurationMS = finishedAt.Sub(runStartedAt).Milliseconds()
+		emitter.Emit(RunProgressEvent{
 			Phase:               RunProgressPhaseRunFinish,
 			RepoRoot:            repoRoot,
 			Provider:            report.Provider,
@@ -148,7 +196,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	if agent.NormalizeProvider(cfg.Agent.Provider) == agent.ProviderClaude {
 		model = cfg.Claude.Model
 	}
-	emitRunProgress(progress, RunProgressEvent{
+	emitter.Emit(RunProgressEvent{
 		Phase:               RunProgressPhaseRunStart,
 		RepoRoot:            repoRoot,
 		Provider:            report.Provider,
@@ -228,7 +276,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		}
 
 		nextIteration := snapshot.CurrentIteration + 1
-		emitRunProgress(progress, RunProgressEvent{
+		emitter.Emit(RunProgressEvent{
 			Phase:               RunProgressPhaseIterationStart,
 			RepoRoot:            repoRoot,
 			Provider:            provider,
@@ -298,7 +346,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			report.Failures = failures
 			report.LastStatus = snapshot.LastStatus
 			report.LastRunDir = runDir
-			emitRunProgress(progress, RunProgressEvent{
+			emitter.Emit(RunProgressEvent{
 				Phase:               RunProgressPhaseIterationSuccess,
 				RepoRoot:            repoRoot,
 				Provider:            provider,
@@ -321,7 +369,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		resultPath := filepath.Join(runDir, "result.json")
 		executionPath := filepath.Join(runDir, "execution.json")
 		startedAt := s.now()
-		emitRunProgress(progress, RunProgressEvent{
+		emitter.Emit(RunProgressEvent{
 			Phase:               RunProgressPhaseAgentExecutionStart,
 			RepoRoot:            repoRoot,
 			Provider:            provider,
@@ -379,7 +427,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, errors.Join(runErr, err)
 			}
-			emitRunProgress(progress, RunProgressEvent{
+			emitter.Emit(RunProgressEvent{
 				Phase:               RunProgressPhaseIterationFailure,
 				RepoRoot:            repoRoot,
 				Provider:            provider,
@@ -540,7 +588,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		report.LastStatus = statusValue
 		report.StoppedOnDone = false
 		report.LastRunDir = runDir
-		emitRunProgress(progress, RunProgressEvent{
+		emitter.Emit(RunProgressEvent{
 			Phase:               RunProgressPhaseIterationSuccess,
 			RepoRoot:            repoRoot,
 			Provider:            provider,
@@ -583,12 +631,6 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		LastRunDir:          snapshot.LastRunDirectory,
 		Lines:               lines,
 	}, nil
-}
-
-func emitRunProgress(fn func(RunProgressEvent), event RunProgressEvent) {
-	if fn != nil {
-		fn(event)
-	}
 }
 
 func (s *Service) requireRepo(ctx context.Context, workingDir string) (string, error) {
