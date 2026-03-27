@@ -30,3 +30,12 @@ func TestParseOutputRejectsMissingStructuredOutput(t *testing.T) {
 		t.Fatalf("expected structured output error")
 	}
 }
+
+func TestParseOutputRejectsEnvelopeDrift(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"is_error":false,"structured_output":{"summary":"added tests","next_instruction":"improve diagnostics","status":"continue","commit_message":"add tests"},"noise":"extra"}`)
+	if _, err := ParseOutput(raw); err == nil {
+		t.Fatalf("expected envelope error")
+	}
+}
