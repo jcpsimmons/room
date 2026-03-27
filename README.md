@@ -215,6 +215,7 @@ ROOM stores all local orchestration state in `.room/`.
 
 This is local state by design. It makes the loop inspectable, resumable, and debuggable without relying on provider session resume.
 ROOM ignores `.room/` in its own dirty checks, diffs, and auto-commits so local state does not contaminate repo improvement runs. If you also want plain `git status` to stay clean, add `.room/` to `.git/info/exclude` or `.gitignore`.
+ROOM also reads a repo-root `.roomignore` file. Use gitignore-style patterns there for files ROOM should ignore in its own status checks, diffs, and auto-commits without changing your repository's normal Git ignore rules.
 
 ## How ROOM Decides What To Do Next
 

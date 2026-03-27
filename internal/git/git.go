@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	ignore "github.com/sabhiram/go-gitignore"
 )
 
 type Client interface {
@@ -37,7 +40,7 @@ type DiffStats struct {
 
 type CLI struct{}
 
-var roomExcludedPathspec = []string{"--", ".", ":(exclude).room"}
+const roomIgnoreFileName = ".roomignore"
 
 func NewClient() Client {
 	return CLI{}
@@ -68,7 +71,15 @@ func (CLI) Root(ctx context.Context, dir string) (string, error) {
 }
 
 func (CLI) StatusShort(ctx context.Context, dir string) (string, error) {
-	return run(ctx, dir, withRoomExclusion("status", "--short")...)
+	entries, err := statusEntries(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	var lines []string
+	for _, entry := range entries {
+		lines = append(lines, entry.raw)
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func (c CLI) IsDirty(ctx context.Context, dir string) (bool, error) {
@@ -77,11 +88,25 @@ func (c CLI) IsDirty(ctx context.Context, dir string) (bool, error) {
 }
 
 func (CLI) Diff(ctx context.Context, dir string) (string, error) {
-	return run(ctx, dir, withRoomExclusion("diff", "--binary")...)
+	paths, err := changedPaths(ctx, dir, true)
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return run(ctx, dir, append([]string{"diff", "--binary", "--"}, paths...)...)
 }
 
 func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
-	out, err := run(ctx, dir, withRoomExclusion("diff", "--numstat")...)
+	paths, err := changedPaths(ctx, dir, true)
+	if err != nil {
+		return DiffStats{}, err
+	}
+	if len(paths) == 0 {
+		return DiffStats{}, nil
+	}
+	out, err := run(ctx, dir, append([]string{"diff", "--numstat", "--"}, paths...)...)
 	if err != nil {
 		return DiffStats{}, err
 	}
@@ -104,7 +129,14 @@ func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
 }
 
 func (CLI) CommitAll(ctx context.Context, dir, message string) (string, error) {
-	if _, err := run(ctx, dir, withRoomExclusion("add", "-A")...); err != nil {
+	paths, err := changedPaths(ctx, dir, false)
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", errors.New("no visible changes to commit")
+	}
+	if _, err := run(ctx, dir, append([]string{"add", "-A", "--"}, paths...)...); err != nil {
 		return "", err
 	}
 	if _, err := run(ctx, dir, "commit", "-m", message); err != nil {
@@ -182,11 +214,113 @@ func parseCommits(raw string) []Commit {
 	return commits
 }
 
-func withRoomExclusion(args ...string) []string {
-	return append(append([]string{}, args...), roomExcludedPathspec...)
+type statusEntry struct {
+	code    string
+	raw     string
+	paths   []string
+	primary string
+}
+
+func statusEntries(ctx context.Context, dir string) ([]statusEntry, error) {
+	raw, err := runRaw(ctx, dir, "status", "--short", "--untracked-files=all", "--", ".")
+	if err != nil {
+		return nil, err
+	}
+	matcher, err := compileIgnoreFile(filepath.Join(dir, roomIgnoreFileName))
+	if err != nil {
+		return nil, err
+	}
+	var entries []statusEntry
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		entry := parseStatusEntry(line)
+		if entry.primary == "" || ignoredEntry(entry, matcher) {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func changedPaths(ctx context.Context, dir string, trackedOnly bool) ([]string, error) {
+	entries, err := statusEntries(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	var paths []string
+	for _, entry := range entries {
+		if trackedOnly && entry.code == "??" {
+			continue
+		}
+		if _, ok := seen[entry.primary]; ok {
+			continue
+		}
+		seen[entry.primary] = struct{}{}
+		paths = append(paths, entry.primary)
+	}
+	return paths, nil
+}
+
+func parseStatusEntry(line string) statusEntry {
+	if len(line) < 4 {
+		return statusEntry{raw: strings.TrimSpace(line)}
+	}
+	pathText := strings.TrimSpace(line[3:])
+	paths := []string{pathText}
+	primary := pathText
+	if before, after, ok := strings.Cut(pathText, " -> "); ok {
+		paths = []string{strings.TrimSpace(before), strings.TrimSpace(after)}
+		primary = strings.TrimSpace(after)
+	}
+	return statusEntry{
+		code:    line[:2],
+		raw:     line,
+		paths:   paths,
+		primary: primary,
+	}
+}
+
+func ignoredEntry(entry statusEntry, matcher ignore.IgnoreParser) bool {
+	for _, path := range entry.paths {
+		if isIgnoredPath(path, matcher) {
+			return true
+		}
+	}
+	return false
+}
+
+func compileIgnoreFile(path string) (ignore.IgnoreParser, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return ignore.CompileIgnoreFile(path)
+}
+
+func isIgnoredPath(path string, matcher ignore.IgnoreParser) bool {
+	normalized := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	normalized = strings.TrimPrefix(normalized, "./")
+	if normalized == ".room" || strings.HasPrefix(normalized, ".room/") {
+		return true
+	}
+	return matcher != nil && matcher.MatchesPath(normalized)
 }
 
 func run(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := runRaw(ctx, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -199,5 +333,5 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 		}
 		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), msg)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }

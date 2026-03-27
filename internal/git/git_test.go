@@ -102,6 +102,89 @@ func TestCommitAllSkipsRoomDirectory(t *testing.T) {
 	}
 }
 
+func TestRoomIgnoreHidesFilesFromStatusAndDiff(t *testing.T) {
+	t.Parallel()
+
+	repo := setupGitRepo(t)
+	writeFile(t, filepath.Join(repo, "visible.txt"), "base\n")
+	writeFile(t, filepath.Join(repo, "ignored.log"), "base\n")
+	writeFile(t, filepath.Join(repo, ".roomignore"), "*.log\nscratch/\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "seed ignore rules")
+
+	writeFile(t, filepath.Join(repo, "visible.txt"), "base\nchange\n")
+	writeFile(t, filepath.Join(repo, "ignored.log"), "base\nchange\n")
+	writeFile(t, filepath.Join(repo, "scratch", "noise.txt"), "ignore me\n")
+
+	client := NewClient()
+	ctx := context.Background()
+
+	status, err := client.StatusShort(ctx, repo)
+	if err != nil {
+		t.Fatalf("status short: %v", err)
+	}
+	if strings.Contains(status, "ignored.log") || strings.Contains(status, "scratch/noise.txt") {
+		t.Fatalf("expected ignored files to be hidden, got %q", status)
+	}
+	if !strings.Contains(status, "visible.txt") {
+		t.Fatalf("expected visible file in status, got %q", status)
+	}
+
+	diff, err := client.Diff(ctx, repo)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	if strings.Contains(diff, "ignored.log") {
+		t.Fatalf("expected ignored file to be absent from diff, got %q", diff)
+	}
+	if !strings.Contains(diff, "visible.txt") {
+		t.Fatalf("expected visible file in diff, got %q", diff)
+	}
+
+	stats, err := client.DiffStats(ctx, repo)
+	if err != nil {
+		t.Fatalf("diff stats: %v", err)
+	}
+	if stats.Files != 1 {
+		t.Fatalf("expected one visible file in diff stats, got %#v", stats)
+	}
+}
+
+func TestCommitAllSkipsRoomIgnoreMatches(t *testing.T) {
+	t.Parallel()
+
+	repo := setupGitRepo(t)
+	writeFile(t, filepath.Join(repo, "visible.txt"), "base\n")
+	writeFile(t, filepath.Join(repo, "ignored.log"), "base\n")
+	writeFile(t, filepath.Join(repo, ".roomignore"), "*.log\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "seed ignore rules")
+
+	writeFile(t, filepath.Join(repo, "visible.txt"), "base\nchange\n")
+	writeFile(t, filepath.Join(repo, "ignored.log"), "base\nchange\n")
+
+	client := NewClient()
+	ctx := context.Background()
+	if _, err := client.CommitAll(ctx, repo, "room: commit visible only"); err != nil {
+		t.Fatalf("commit all: %v", err)
+	}
+
+	paths := strings.Split(strings.TrimSpace(runGit(t, repo, "show", "--pretty=format:", "--name-only", "HEAD")), "\n")
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "ignored.log" {
+			t.Fatalf("expected HEAD to exclude ignored.log, got paths %v", paths)
+		}
+	}
+
+	status, err := client.StatusShort(ctx, repo)
+	if err != nil {
+		t.Fatalf("status short: %v", err)
+	}
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("expected ignored remainder to stay hidden, got %q", status)
+	}
+}
+
 func setupGitRepo(t *testing.T) string {
 	t.Helper()
 
