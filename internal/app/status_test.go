@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/version"
@@ -122,5 +123,36 @@ func TestStatusSurvivesMissingInstructionFile(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("status lines missing %q:\n%s", want, joined)
 		}
+	}
+}
+
+func TestStatusSurfacesStaleLockRecoveryState(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	writeTailBundle(t, paths.RunsDir, "0001", "resurrected prompt", nil, "")
+	if err := writeBundleManifest(filepath.Join(paths.RunsDir, "0001"), bundleModeDryRun, []string{"prompt.txt"}, &bundleLockRecovery{
+		PID:       4242,
+		StartedAt: time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write bundle manifest: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.LatestBundleRecovery == "" {
+		t.Fatal("expected stale-lock recovery state")
+	}
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "Stale-lock recovery: Reclaimed stale run lock from pid 4242 started 2026-03-25T11:00:00Z.") {
+		t.Fatalf("status lines missing recovery state:\n%s", joined)
 	}
 }

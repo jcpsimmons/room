@@ -22,24 +22,24 @@ const (
 	bundleModeDryRun    bundleMode = "dry_run"
 	bundleModeExecuted  bundleMode = "executed"
 	bundleModeLegacy    bundleMode = "legacy"
-	bundleIntegrityOK               = "verified"
-	bundleIntegrityWarn             = "unverified"
-	bundleIntegrityBad              = "mismatch"
+	bundleIntegrityOK              = "verified"
+	bundleIntegrityWarn            = "unverified"
+	bundleIntegrityBad             = "mismatch"
 )
 
 var errMalformedBundleManifest = fmt.Errorf("malformed bundle manifest")
 
 const (
-	bundleIntegrityHintDecodeFailed     = "manifest_decode_failed"
-	bundleIntegrityHintModeInvalid      = "manifest_mode_invalid"
-	bundleIntegrityHintRunDirMissing    = "manifest_run_dir_missing"
-	bundleIntegrityHintArtifactName     = "manifest_artifact_name_missing"
-	bundleIntegrityHintArtifactDuplicate = "manifest_artifact_duplicate"
-	bundleIntegrityHintArtifactHash      = "manifest_artifact_hash_invalid"
-	bundleIntegrityHintFileMissing       = "artifact_file_missing"
-	bundleIntegrityHintSizeChanged       = "artifact_size_changed"
-	bundleIntegrityHintChecksumChanged   = "artifact_hash_changed"
-	bundleIntegrityHintManifestMissing   = "manifest_artifact_missing"
+	bundleIntegrityHintDecodeFailed       = "manifest_decode_failed"
+	bundleIntegrityHintModeInvalid        = "manifest_mode_invalid"
+	bundleIntegrityHintRunDirMissing      = "manifest_run_dir_missing"
+	bundleIntegrityHintArtifactName       = "manifest_artifact_name_missing"
+	bundleIntegrityHintArtifactDuplicate  = "manifest_artifact_duplicate"
+	bundleIntegrityHintArtifactHash       = "manifest_artifact_hash_invalid"
+	bundleIntegrityHintFileMissing        = "artifact_file_missing"
+	bundleIntegrityHintSizeChanged        = "artifact_size_changed"
+	bundleIntegrityHintChecksumChanged    = "artifact_hash_changed"
+	bundleIntegrityHintManifestMissing    = "manifest_artifact_missing"
 	bundleIntegrityHintRunArtifactMissing = "run_artifact_missing"
 )
 
@@ -50,10 +50,16 @@ type bundleArtifact struct {
 }
 
 type bundleManifest struct {
-	RunDir    string           `json:"run_dir"`
-	Mode      bundleMode       `json:"mode"`
-	CreatedAt time.Time        `json:"created_at"`
-	Artifacts []bundleArtifact `json:"artifacts"`
+	RunDir    string              `json:"run_dir"`
+	Mode      bundleMode          `json:"mode"`
+	CreatedAt time.Time           `json:"created_at"`
+	StaleLock *bundleLockRecovery `json:"stale_lock_recovery,omitempty"`
+	Artifacts []bundleArtifact    `json:"artifacts"`
+}
+
+type bundleLockRecovery struct {
+	PID       int       `json:"pid"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 type BundleIntegrityHint struct {
@@ -67,6 +73,7 @@ type bundleAssessment struct {
 	Mode       bundleMode
 	Integrity  string
 	Hint       string
+	Recovery   string
 	ManifestOK bool
 	Hints      []BundleIntegrityHint
 }
@@ -79,11 +86,14 @@ func newBundleIntegrityHint(code, detail, artifact string) BundleIntegrityHint {
 	}
 }
 
-func writeBundleManifest(runDir string, mode bundleMode, artifactNames []string) error {
+func writeBundleManifest(runDir string, mode bundleMode, artifactNames []string, recovery ...*bundleLockRecovery) error {
 	manifest := bundleManifest{
 		RunDir:    runDir,
 		Mode:      mode,
 		CreatedAt: time.Now().UTC(),
+	}
+	if len(recovery) > 0 && recovery[0] != nil {
+		manifest.StaleLock = recovery[0]
 	}
 	for _, name := range artifactNames {
 		artifactPath := filepath.Join(runDir, name)
@@ -325,6 +335,9 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 
 	assessment.Integrity = bundleIntegrityOK
 	assessment.ManifestOK = true
+	if manifest.StaleLock != nil {
+		assessment.Recovery = fmt.Sprintf("Reclaimed stale run lock from pid %d started %s.", manifest.StaleLock.PID, manifest.StaleLock.StartedAt.UTC().Format(time.RFC3339))
+	}
 	return assessment, nil
 }
 

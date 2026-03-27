@@ -43,7 +43,8 @@ func TestRenderersReturnText(t *testing.T) {
 		Iteration:          12,
 		LastRun:            "2026-03-25T12:00:00Z",
 		LastStatus:         "continue",
-		RecoveryHint:       "Hint: newest bundle 0002 is incomplete; missing result.json and diff.patch.",
+		BundleHint:         "Hint: newest bundle 0002 is incomplete; missing result.json and diff.patch.",
+		RecoveryHint:       "Hint: reclaimed stale run lock from pid 4242 started 2026-03-25T11:00:00Z.",
 		Dirty:              false,
 		CurrentInstruction: "make the UI feel alive",
 		RecentCommits:      []string{"abc123 add UI polish"},
@@ -53,7 +54,10 @@ func TestRenderersReturnText(t *testing.T) {
 		t.Fatal("expected status render")
 	}
 	if !strings.Contains(statusOut, "newest bundle 0002") {
-		t.Fatalf("expected recovery hint to render, got:\n%s", statusOut)
+		t.Fatalf("expected bundle hint to render, got:\n%s", statusOut)
+	}
+	if !strings.Contains(statusOut, "reclaimed stale run lock") {
+		t.Fatalf("expected stale-lock recovery to render, got:\n%s", statusOut)
 	}
 
 	doctorOut := RenderDoctor(DoctorSummary{

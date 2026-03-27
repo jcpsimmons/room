@@ -177,7 +177,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	snapshot.LastProvider = provider
 	snapshot.LastProviderVersion = providerVersion
 
-	releaseLock, lockNote, err := s.acquireRunLock(paths.RoomDir, repoRoot, provider)
+	releaseLock, lockNote, lockRecovery, err := s.acquireRunLock(paths.RoomDir, repoRoot, provider)
 	if err != nil {
 		return RunReport{}, err
 	}
@@ -289,7 +289,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, err
 			}
-			if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}); err != nil {
+			if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}, lockRecovery); err != nil {
 				return RunReport{}, err
 			}
 			report.CompletedIterations = completed
@@ -514,7 +514,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			"stderr.log",
 			"result.json",
 			"diff.patch",
-		}); err != nil {
+		}, lockRecovery); err != nil {
 			return RunReport{}, err
 		}
 

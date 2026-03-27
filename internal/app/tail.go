@@ -25,6 +25,7 @@ type TailReport struct {
 	RunDir               string                `json:"run_dir"`
 	BundleMode           string                `json:"bundle_mode,omitempty"`
 	BundleIntegrity      string                `json:"bundle_integrity,omitempty"`
+	BundleRecovery       string                `json:"bundle_recovery,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint `json:"bundle_integrity_hints,omitempty"`
 	Prompt               string                `json:"prompt"`
 	Result               *agent.Result         `json:"result,omitempty"`
@@ -77,6 +78,9 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if len(assessment.Hints) > 0 {
 		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(assessment.Hints)))
 	}
+	if assessment.Recovery != "" {
+		lines = append(lines, fmt.Sprintf("Stale-lock recovery: %s", assessment.Recovery))
+	}
 	lines = append(lines,
 		"Prompt:",
 	)
@@ -114,6 +118,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		RunDir:               runDir,
 		BundleMode:           string(assessment.Mode),
 		BundleIntegrity:      assessment.Integrity,
+		BundleRecovery:       assessment.Recovery,
 		BundleIntegrityHints: assessment.Hints,
 		Prompt:               strings.TrimSpace(string(promptBody)),
 		Result:               resultIfPresent(result, hasResult),

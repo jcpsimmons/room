@@ -30,6 +30,7 @@ type StatusReport struct {
 	LatestBundleMode           string                `json:"latest_bundle_mode,omitempty"`
 	LatestBundleIntegrity      string                `json:"latest_bundle_integrity,omitempty"`
 	LatestBundleHint           string                `json:"latest_bundle_hint,omitempty"`
+	LatestBundleRecovery       string                `json:"latest_bundle_recovery,omitempty"`
 	LatestBundleIntegrityHints []BundleIntegrityHint `json:"latest_bundle_integrity_hints,omitempty"`
 	LatestLockHint             string                `json:"latest_lock_hint,omitempty"`
 	Dirty                      bool                  `json:"dirty"`
@@ -103,6 +104,9 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if len(assessment.Hints) > 0 {
 		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(assessment.Hints)))
 	}
+	if assessment.Recovery != "" {
+		lines = append(lines, fmt.Sprintf("Stale-lock recovery: %s", assessment.Recovery))
+	}
 	if lockHint != "" {
 		lines = append(lines, lockHint)
 	}
@@ -137,6 +141,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		LatestBundleMode:           string(assessment.Mode),
 		LatestBundleIntegrity:      assessment.Integrity,
 		LatestBundleHint:           assessment.Hint,
+		LatestBundleRecovery:       assessment.Recovery,
 		LatestBundleIntegrityHints: assessment.Hints,
 		LatestLockHint:             lockHint,
 		Dirty:                      dirty,

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/fsutil"
@@ -165,6 +166,33 @@ diff --git a/b.txt b/b.txt
 		}
 		if strings.Contains(joined, "missing result.json and diff.patch") {
 			t.Fatalf("dry-run bundle should not be treated as incomplete:\n%s", joined)
+		}
+	})
+
+	t.Run("stale-lock recovery is surfaced", func(t *testing.T) {
+		runDir := filepath.Join(paths.RunsDir, "0006")
+		writeTailBundle(t, paths.RunsDir, "0006", "resurrected prompt", nil, "")
+		if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}, &bundleLockRecovery{
+			PID:       4242,
+			StartedAt: time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+		}); err != nil {
+			t.Fatalf("write bundle manifest: %v", err)
+		}
+
+		report, err := svc.Tail(context.Background(), TailOptions{WorkingDir: repoRoot})
+		if err != nil {
+			t.Fatalf("tail: %v", err)
+		}
+		if report.BundleRecovery == "" {
+			t.Fatal("expected stale-lock recovery to be present")
+		}
+		joined := strings.Join(report.Lines, "\n")
+		for _, want := range []string{
+			"Stale-lock recovery: Reclaimed stale run lock from pid 4242 started 2026-03-25T11:00:00Z.",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("tail output missing %q:\n%s", want, joined)
+			}
 		}
 	})
 }

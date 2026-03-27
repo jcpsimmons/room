@@ -28,6 +28,7 @@ type StatusSummary struct {
 	Iteration          int
 	LastRun            string
 	LastStatus         string
+	BundleHint         string
 	RecoveryHint       string
 	Dirty              bool
 	CurrentInstruction string
@@ -73,7 +74,7 @@ func RenderInit(summary InitSummary) string {
 }
 
 func RenderStatus(summary StatusSummary) string {
-	header := framed("STATUS", strings.Join([]string{
+	headerLines := []string{
 		rainbow("ROOM"),
 		subtitleStyle().Render("repository orchestration status"),
 		kvLine("repo", summary.RepoRoot, accentCyan),
@@ -82,8 +83,14 @@ func RenderStatus(summary StatusSummary) string {
 		kvLine("last run", summary.LastRun, accentGold),
 		kvLine("dirty", fmt.Sprintf("%t", summary.Dirty), accentRed),
 		kvLine("status", summary.LastStatus, accentViolet),
-		kvLine("recovery", summary.RecoveryHint, accentGold),
-	}, "\n"), accentCyan)
+	}
+	if strings.TrimSpace(summary.BundleHint) != "" {
+		headerLines = append(headerLines, kvLine("bundle", summary.BundleHint, accentGold))
+	}
+	if strings.TrimSpace(summary.RecoveryHint) != "" {
+		headerLines = append(headerLines, kvLine("recovery", summary.RecoveryHint, accentViolet))
+	}
+	header := framed("STATUS", strings.Join(headerLines, "\n"), accentCyan)
 
 	instruction := framed("INSTRUCTION", summary.CurrentInstruction, accentPink)
 	commits := framed("ROOM COMMITS", bulletLines(summary.RecentCommits, accentCyan), accentCyan)
