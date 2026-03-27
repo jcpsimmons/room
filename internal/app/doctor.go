@@ -13,6 +13,7 @@ import (
 	"github.com/jcpsimmons/room/internal/codex"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
+	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/state"
 )
@@ -128,6 +129,18 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: true, Message: ".git/info/exclude already protects .room/"})
 	} else {
 		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: ".git/info/exclude does not mention .room/; run `room init` or add it manually to keep plain `git status` clean"})
+	}
+	roomIgnorePath := filepath.Join(repoRoot, ".roomignore")
+	if fsutil.FileExists(roomIgnorePath) {
+		if err := git.ValidateRoomIgnore(repoRoot); err != nil {
+			checks = append(checks, DoctorCheck{
+				Name:    "room_ignore",
+				OK:      false,
+				Message: fmt.Sprintf("malformed .roomignore; ROOM will skip custom ignore rules until fixed: %v", err),
+			})
+		} else {
+			checks = append(checks, DoctorCheck{Name: "room_ignore", OK: true, Message: ".roomignore parses cleanly"})
+		}
 	}
 	if fsutil.DirExists(paths.RoomDir) {
 		var problems []string

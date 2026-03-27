@@ -182,3 +182,32 @@ func TestStatusSurfacesMalformedRunLockHint(t *testing.T) {
 		t.Fatalf("status lines missing unreadable lock hint:\n%s", strings.Join(report.Lines, "\n"))
 	}
 }
+
+func TestStatusSurfacesMalformedRoomIgnoreHint(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(filepath.Join(repoRoot, ".roomignore"), []byte("[\n"), 0o644); err != nil {
+		t.Fatalf("write malformed roomignore: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.RoomIgnoreHint == "" {
+		t.Fatal("expected malformed .roomignore hint")
+	}
+	if !strings.Contains(report.RoomIgnoreHint, "malformed .roomignore") {
+		t.Fatalf("room ignore hint = %q", report.RoomIgnoreHint)
+	}
+	if !strings.Contains(strings.Join(report.Lines, "\n"), "malformed .roomignore") {
+		t.Fatalf("status lines missing malformed roomignore hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}

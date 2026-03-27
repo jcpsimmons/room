@@ -422,7 +422,7 @@ func (w *jsonLineWriter) Err() error {
 }
 
 type runJSONProgressEvent struct {
-	SchemaVersion int `json:"schema_version"`
+	SchemaVersion int    `json:"schema_version"`
 	Type          string `json:"type"`
 	app.RunProgressEvent
 	Error string `json:"error,omitempty"`
@@ -695,6 +695,7 @@ func renderStatus(report app.StatusReport) error {
 		LastStatus:         report.State.LastStatus,
 		BundleHint:         report.LatestBundleHint,
 		RecoveryHint:       report.LatestBundleRecovery,
+		RoomIgnoreHint:     report.RoomIgnoreHint,
 		Dirty:              report.Dirty,
 		CurrentInstruction: report.CurrentInstruction,
 		RecentCommits:      report.RecentCommits,

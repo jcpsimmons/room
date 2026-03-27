@@ -225,3 +225,44 @@ func TestDoctorSurfacesMalformedSummaryHistory(t *testing.T) {
 		t.Fatalf("doctor output missing history hint:\n%s", joined)
 	}
 }
+
+func TestDoctorSurfacesMalformedRoomIgnore(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(filepath.Join(repoRoot, ".roomignore"), []byte("[\n"), 0o644); err != nil {
+		t.Fatalf("write malformed roomignore: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "room_ignore" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected malformed .roomignore to fail, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "malformed .roomignore") {
+			t.Fatalf("unexpected room_ignore message: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected room_ignore check, got %#v", report.Checks)
+	}
+
+	if !strings.Contains(strings.Join(report.Lines, "\n"), "malformed .roomignore") {
+		t.Fatalf("doctor output missing malformed roomignore hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}

@@ -30,6 +30,7 @@ type StatusSummary struct {
 	LastStatus         string
 	BundleHint         string
 	RecoveryHint       string
+	RoomIgnoreHint     string
 	Dirty              bool
 	CurrentInstruction string
 	RecentCommits      []string
@@ -89,6 +90,9 @@ func RenderStatus(summary StatusSummary) string {
 	}
 	if strings.TrimSpace(summary.RecoveryHint) != "" {
 		headerLines = append(headerLines, kvLine("recovery", summary.RecoveryHint, accentViolet))
+	}
+	if strings.TrimSpace(summary.RoomIgnoreHint) != "" {
+		headerLines = append(headerLines, kvLine("ignore", summary.RoomIgnoreHint, accentGold))
 	}
 	header := framed("STATUS", strings.Join(headerLines, "\n"), accentCyan)
 

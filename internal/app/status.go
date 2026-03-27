@@ -10,6 +10,7 @@ import (
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/fsutil"
+	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/state"
 )
@@ -33,6 +34,7 @@ type StatusReport struct {
 	LatestBundleRecovery       string                `json:"latest_bundle_recovery,omitempty"`
 	LatestBundleIntegrityHints []BundleIntegrityHint `json:"latest_bundle_integrity_hints,omitempty"`
 	LatestLockHint             string                `json:"latest_lock_hint,omitempty"`
+	RoomIgnoreHint             string                `json:"room_ignore_hint,omitempty"`
 	Dirty                      bool                  `json:"dirty"`
 	Lines                      []string              `json:"lines"`
 }
@@ -110,6 +112,13 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if lockHint != "" {
 		lines = append(lines, lockHint)
 	}
+	roomIgnoreHint, err := loadRoomIgnoreHint(repoRoot)
+	if err != nil {
+		return StatusReport{}, err
+	}
+	if roomIgnoreHint != "" {
+		lines = append(lines, roomIgnoreHint)
+	}
 	if instructionHint != "" {
 		lines = append(lines, instructionHint)
 	}
@@ -144,6 +153,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		LatestBundleRecovery:       assessment.Recovery,
 		LatestBundleIntegrityHints: assessment.Hints,
 		LatestLockHint:             lockHint,
+		RoomIgnoreHint:             roomIgnoreHint,
 		Dirty:                      dirty,
 		Lines:                      lines,
 	}, nil
@@ -181,4 +191,11 @@ func newestBundleHint(runsDir string) (string, string, error) {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func loadRoomIgnoreHint(repoRoot string) (string, error) {
+	if err := git.ValidateRoomIgnore(repoRoot); err != nil {
+		return fmt.Sprintf("Ignore file: malformed .roomignore; ROOM will skip custom ignore rules until fixed: %v", err), nil
+	}
+	return "", nil
 }

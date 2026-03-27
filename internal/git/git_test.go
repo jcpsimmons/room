@@ -150,6 +150,49 @@ func TestRoomIgnoreHidesFilesFromStatusAndDiff(t *testing.T) {
 	}
 }
 
+func TestMalformedRoomIgnoreFallsBackToBuiltInIgnore(t *testing.T) {
+	t.Parallel()
+
+	repo := setupGitRepo(t)
+	writeFile(t, filepath.Join(repo, ".roomignore"), "[\n")
+	writeFile(t, filepath.Join(repo, "visible.txt"), "base\n")
+	writeFile(t, filepath.Join(repo, ".room", "state.json"), "base\n")
+	runGit(t, repo, "add", ".roomignore", "visible.txt")
+	runGit(t, repo, "commit", "-m", "seed malformed ignore")
+
+	writeFile(t, filepath.Join(repo, "visible.txt"), "base\nchange\n")
+	writeFile(t, filepath.Join(repo, ".room", "state.json"), "updated\n")
+
+	client := NewClient()
+	ctx := context.Background()
+
+	if err := ValidateRoomIgnore(repo); err == nil {
+		t.Fatal("expected malformed .roomignore to fail validation")
+	}
+
+	status, err := client.StatusShort(ctx, repo)
+	if err != nil {
+		t.Fatalf("status short: %v", err)
+	}
+	if !strings.Contains(status, "visible.txt") {
+		t.Fatalf("expected visible file in status, got %q", status)
+	}
+	if strings.Contains(status, ".room/state.json") {
+		t.Fatalf("expected built-in .room ignore to survive malformed .roomignore, got %q", status)
+	}
+
+	if _, err := client.CommitAll(ctx, repo, "room: update visible file"); err != nil {
+		t.Fatalf("commit all: %v", err)
+	}
+
+	paths := strings.Split(strings.TrimSpace(runGit(t, repo, "show", "--pretty=format:", "--name-only", "HEAD")), "\n")
+	for _, path := range paths {
+		if strings.HasPrefix(strings.TrimSpace(path), ".room/") {
+			t.Fatalf("expected HEAD to exclude .room artifacts, got paths %v", paths)
+		}
+	}
+}
+
 func TestCommitAllSkipsRoomIgnoreMatches(t *testing.T) {
 	t.Parallel()
 

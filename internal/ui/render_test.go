@@ -45,6 +45,7 @@ func TestRenderersReturnText(t *testing.T) {
 		LastStatus:         "continue",
 		BundleHint:         "Hint: newest bundle 0002 is incomplete; missing result.json and diff.patch.",
 		RecoveryHint:       "Hint: reclaimed stale run lock from pid 4242 started 2026-03-25T11:00:00Z.",
+		RoomIgnoreHint:     "Ignore file: malformed .roomignore; ROOM will skip custom ignore rules until fixed: unexpected character '[' in pattern",
 		Dirty:              false,
 		CurrentInstruction: "make the UI feel alive",
 		RecentCommits:      []string{"abc123 add UI polish"},
@@ -58,6 +59,9 @@ func TestRenderersReturnText(t *testing.T) {
 	}
 	if !strings.Contains(statusOut, "reclaimed stale run lock") {
 		t.Fatalf("expected stale-lock recovery to render, got:\n%s", statusOut)
+	}
+	if !strings.Contains(statusOut, "malformed .roomignore") {
+		t.Fatalf("expected roomignore hint to render, got:\n%s", statusOut)
 	}
 
 	doctorOut := RenderDoctor(DoctorSummary{

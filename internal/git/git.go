@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -324,6 +325,45 @@ func compileIgnoreFile(path string) (ignore.IgnoreParser, error) {
 		return nil, err
 	}
 	return ignore.CompileIgnoreFile(path)
+}
+
+func ValidateRoomIgnore(repoRoot string) error {
+	path := filepath.Join(repoRoot, roomIgnoreFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for i, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if compiledPatternCount(ignore.CompileIgnoreLines(line)) == 0 {
+			return fmt.Errorf("invalid .roomignore pattern on line %d: %q", i+1, trimmed)
+		}
+	}
+	return nil
+}
+
+func compiledPatternCount(parser ignore.IgnoreParser) int {
+	if parser == nil {
+		return 0
+	}
+	value := reflect.ValueOf(parser)
+	if value.Kind() == reflect.Pointer {
+		value = value.Elem()
+	}
+	if !value.IsValid() {
+		return 0
+	}
+	field := value.FieldByName("patterns")
+	if !field.IsValid() || field.Kind() != reflect.Slice {
+		return 0
+	}
+	return field.Len()
 }
 
 func isIgnoredPath(path string, matcher ignore.IgnoreParser) bool {
