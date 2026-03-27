@@ -113,6 +113,27 @@ func TestRunUIOptions(t *testing.T) {
 	}
 }
 
+func TestToUIProgressEventCarriesDiagnostics(t *testing.T) {
+	ev := toUIProgressEvent(app.RunProgressEvent{
+		Phase:          app.RunProgressPhaseIterationFailure,
+		Iteration:      5,
+		Failures:       2,
+		Err:            errTestBoom,
+		StdoutFragment: "stdout fault",
+		StderrFragment: "stderr fault",
+	})
+
+	if ev.Kind != ui.ProgressFailure {
+		t.Fatalf("kind = %q", ev.Kind)
+	}
+	if ev.Stdout != "stdout fault" {
+		t.Fatalf("stdout = %q", ev.Stdout)
+	}
+	if ev.Stderr != "stderr fault" {
+		t.Fatalf("stderr = %q", ev.Stderr)
+	}
+}
+
 func TestResolveInitPrompt(t *testing.T) {
 	got, err := resolveInitPrompt("Build a release bot", nil)
 	if err != nil {

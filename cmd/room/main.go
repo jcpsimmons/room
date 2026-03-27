@@ -558,6 +558,8 @@ func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
 		HasFailures:  true,
 		HasPercent:   total > 0,
 		When:         progressWhen(event),
+		Stdout:       event.StdoutFragment,
+		Stderr:       event.StderrFragment,
 
 		Provider:      event.Provider,
 		Model:         event.Model,

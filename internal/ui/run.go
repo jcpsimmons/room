@@ -31,6 +31,8 @@ type ProgressEvent struct {
 	Kind         ProgressKind
 	Title        string
 	Detail       string
+	Stdout       string
+	Stderr       string
 	Iteration    int
 	Total        int
 	Completed    int
@@ -94,6 +96,8 @@ type RunModel struct {
 	status    ProgressKind
 	headline  string
 	detail    string
+	stdout    string
+	stderr    string
 	events    []ProgressEvent
 
 	// Run config params for the CONFIG panel.
@@ -139,8 +143,8 @@ type trailPoint struct {
 }
 
 type spark struct {
-	proj *harmonica.Projectile
-	age  float64
+	proj  *harmonica.Projectile
+	age   float64
 	glyph rune
 }
 
@@ -296,7 +300,7 @@ func (m RunModel) View() string {
 		statusHeight = mainHeight - decayHeight
 	}
 
-	// Right column: SCOPE + RESONANCE + FLUX + EVENTS.
+	// Right column: SCOPE + RESONANCE + DIAGNOSTICS + EVENTS.
 	scopeHeight := 14
 	if scopeHeight > mainHeight/3 {
 		scopeHeight = mainHeight / 3
@@ -321,7 +325,7 @@ func (m RunModel) View() string {
 	right := lipglossJoinVertical(
 		m.renderPhysicsPanel(rightWidth, scopeHeight),
 		m.renderResonancePanel(rightWidth, vizHeight),
-		m.renderFluxPanel(rightWidth, vizHeight),
+		m.renderDiagnosticsPanel(rightWidth, vizHeight),
 		m.renderEventStream(rightWidth, eventsHeight),
 	)
 
@@ -362,6 +366,10 @@ func (m RunModel) consume(ev ProgressEvent) RunModel {
 	}
 	if ev.Detail != "" {
 		m.detail = ev.Detail
+	}
+	if ev.Stdout != "" || ev.Stderr != "" {
+		m.stdout = ev.Stdout
+		m.stderr = ev.Stderr
 	}
 	if ev.HasIteration && ev.Title == "" {
 		m.headline = fmt.Sprintf("iteration %d", ev.Iteration)
@@ -771,6 +779,29 @@ func (m RunModel) renderFluxPanel(width, height int) string {
 	}, "\n")
 
 	return renderPanel("FLUX", body, accentViolet, width, height)
+}
+
+func (m RunModel) renderDiagnosticsPanel(width, height int) string {
+	lines := []string{}
+	if strings.TrimSpace(m.stderr) != "" {
+		lines = append(lines,
+			accentBadge(accentRed).Render(" STDERR "),
+			subtitleStyle().Render(m.stderr),
+		)
+	}
+	if strings.TrimSpace(m.stdout) != "" {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines,
+			accentBadge(accentGold).Render(" STDOUT "),
+			subtitleStyle().Render(m.stdout),
+		)
+	}
+	if len(lines) == 0 {
+		lines = []string{subtitleStyle().Render("fault fragments will appear here when a step overloads")}
+	}
+	return renderPanel("DIAGNOSTICS", strings.Join(lines, "\n"), accentOrange, width, height)
 }
 
 func clampInt(v, lo, hi int) int {

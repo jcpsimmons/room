@@ -27,6 +27,8 @@ func TestRunModelViewFillsViewport(t *testing.T) {
 		HasCompleted: true,
 		HasFailures:  true,
 		HasPercent:   true,
+		Stdout:       "stdout pulse",
+		Stderr:       "stderr shard",
 	})
 
 	view := model.View()
@@ -43,6 +45,9 @@ func TestRunModelViewFillsViewport(t *testing.T) {
 	if !strings.Contains(view, "SEQUENCE MEMORY") {
 		t.Fatal("expected events panel in run view")
 	}
+	if !strings.Contains(view, "DIAGNOSTICS") {
+		t.Fatal("expected diagnostics panel in run view")
+	}
 }
 
 func TestRenderPanelUsesRequestedSize(t *testing.T) {
@@ -53,5 +58,19 @@ func TestRenderPanelUsesRequestedSize(t *testing.T) {
 	}
 	if got := lipgloss.Height(out); got != 8 {
 		t.Fatalf("panel height = %d, want 8", got)
+	}
+}
+
+func TestRenderDiagnosticsPanelShowsFaultFragments(t *testing.T) {
+	model := NewRunModel(1)
+	model.stderr = "stderr shard"
+	model.stdout = "stdout pulse"
+
+	out := model.renderDiagnosticsPanel(48, 10)
+
+	for _, want := range []string{"DIAGNOSTICS", "stderr shard", "stdout pulse"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("diagnostics panel missing %q:\n%s", want, out)
+		}
 	}
 }

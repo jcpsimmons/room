@@ -1196,3 +1196,18 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+func TestFaultFragmentKeepsTail(t *testing.T) {
+	raw := "boot\nphase a\nphase b\nphase c\nphase d\nphase e\nphase f\nterminal overload\n"
+
+	got := faultFragment(raw)
+
+	if strings.Contains(got, "boot") {
+		t.Fatalf("expected old lines trimmed from %q", got)
+	}
+	for _, want := range []string{"phase b", "terminal overload"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fragment missing %q in %q", want, got)
+		}
+	}
+}

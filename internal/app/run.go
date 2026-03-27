@@ -66,6 +66,8 @@ type RunProgressEvent struct {
 	Summary             string           `json:"summary"`
 	NextInstruction     string           `json:"next_instruction"`
 	CommitMessage       string           `json:"commit_message"`
+	StdoutFragment      string           `json:"stdout_fragment,omitempty"`
+	StderrFragment      string           `json:"stderr_fragment,omitempty"`
 	DryRun              bool             `json:"dry_run"`
 	CommitEnabled       bool             `json:"commit_enabled"`
 	Err                 error            `json:"-"`
@@ -444,6 +446,8 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				RunDir:              runDir,
 				PromptPath:          promptPath,
 				Status:              "failed",
+				StdoutFragment:      faultFragment(execution.Stdout),
+				StderrFragment:      faultFragment(execution.Stderr),
 				Err:                 runErr,
 				CommitEnabled:       commitEnabled,
 				StartedAt:           startedAt.UTC(),
@@ -712,4 +716,29 @@ func runFailureNote(err error) string {
 		return "Wrapper drift detected: Claude output envelope was malformed."
 	}
 	return ""
+}
+
+func faultFragment(raw string) string {
+	const (
+		maxLines = 6
+		maxChars = 280
+	)
+
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, "\r\t ")
+	}
+	fragment := strings.TrimSpace(strings.Join(lines, "\n"))
+	if len(fragment) <= maxChars {
+		return fragment
+	}
+	return strings.TrimSpace(fragment[len(fragment)-maxChars:])
 }
