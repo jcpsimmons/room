@@ -39,7 +39,7 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 	if err != nil {
 		return InspectReport{}, err
 	}
-	_, bundleHint, err := newestBundleHint(paths.RunsDir)
+	assessment, err := assessNewestBundle(paths.RunsDir)
 	if err != nil {
 		return InspectReport{}, err
 	}
@@ -59,7 +59,7 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 	return InspectReport{
 		Prompt: prompt.Build(prompt.BuildInput{
 			CurrentInstruction: currentInstruction,
-			RecoveryHint:       bundleHint,
+			RecoveryHint:       assessment.Hint,
 			RecentSummaries:    summaries,
 			PriorInstructions:  priorInstructions,
 			RecentCommits:      commits,

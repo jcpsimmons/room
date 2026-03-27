@@ -102,6 +102,37 @@ diff --git a/b.txt b/b.txt
 			}
 		}
 	})
+
+	t.Run("manifested dry run", func(t *testing.T) {
+		runDir := filepath.Join(paths.RunsDir, "0004")
+		writeTailBundle(t, paths.RunsDir, "0004", "dry-run prompt", nil, "")
+		if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}); err != nil {
+			t.Fatalf("write bundle manifest: %v", err)
+		}
+
+		report, err := svc.Tail(context.Background(), TailOptions{WorkingDir: repoRoot})
+		if err != nil {
+			t.Fatalf("tail: %v", err)
+		}
+		if report.BundleMode != string(bundleModeDryRun) {
+			t.Fatalf("bundle mode = %q", report.BundleMode)
+		}
+		if report.BundleIntegrity != bundleIntegrityOK {
+			t.Fatalf("bundle integrity = %q", report.BundleIntegrity)
+		}
+		joined := strings.Join(report.Lines, "\n")
+		for _, want := range []string{
+			"Bundle mode: dry_run",
+			"Bundle integrity: verified",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("tail output missing %q:\n%s", want, joined)
+			}
+		}
+		if strings.Contains(joined, "missing result.json and diff.patch") {
+			t.Fatalf("dry-run bundle should not be treated as incomplete:\n%s", joined)
+		}
+	})
 }
 
 func writeTailBundle(t *testing.T, runsDir, name, prompt string, result *agent.Result, patch string) {

@@ -282,6 +282,9 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, err
 			}
+			if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}); err != nil {
+				return RunReport{}, err
+			}
 			report.CompletedIterations = completed
 			report.Failures = failures
 			report.LastStatus = snapshot.LastStatus
@@ -495,6 +498,16 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		snapshot.CurrentInstructionHash = state.InstructionHash(nextInstruction)
 		snapshot.RoomVersion = s.version.Version
 		if err := s.saveState(paths.StatePath, snapshot); err != nil {
+			return RunReport{}, err
+		}
+		if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
+			"prompt.txt",
+			"execution.json",
+			"stdout.log",
+			"stderr.log",
+			"result.json",
+			"diff.patch",
+		}); err != nil {
 			return RunReport{}, err
 		}
 

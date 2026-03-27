@@ -26,6 +26,8 @@ type StatusReport struct {
 	RecentSummaries    []logs.SummaryEntry `json:"recent_summaries"`
 	RecentCommits      []string            `json:"recent_commits"`
 	LatestRunDir       string              `json:"latest_run_dir,omitempty"`
+	LatestBundleMode   string              `json:"latest_bundle_mode,omitempty"`
+	LatestBundleIntegrity string           `json:"latest_bundle_integrity,omitempty"`
 	LatestBundleHint   string              `json:"latest_bundle_hint,omitempty"`
 	LatestLockHint     string              `json:"latest_lock_hint,omitempty"`
 	Dirty              bool                `json:"dirty"`
@@ -61,10 +63,11 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if err != nil {
 		return StatusReport{}, err
 	}
-	latestRunDir, bundleHint, err := newestBundleHint(paths.RunsDir)
+	assessment, err := assessNewestBundle(paths.RunsDir)
 	if err != nil {
 		return StatusReport{}, err
 	}
+	latestRunDir := assessment.RunDir
 	lockHint, err := runLockHint(paths.RoomDir, s.processAlive)
 	if err != nil {
 		return StatusReport{}, err
@@ -86,8 +89,8 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		fmt.Sprintf("Last status: %s", snapshot.LastStatus),
 		fmt.Sprintf("Dirty worktree: %t", dirty),
 	}
-	if bundleHint != "" {
-		lines = append(lines, bundleHint)
+	if assessment.Hint != "" {
+		lines = append(lines, assessment.Hint)
 	}
 	if lockHint != "" {
 		lines = append(lines, lockHint)
@@ -117,10 +120,12 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		RecentSummaries:    summaries,
 		RecentCommits:      commitLines,
 		LatestRunDir:       latestRunDir,
-		LatestBundleHint:   bundleHint,
-		LatestLockHint:     lockHint,
-		Dirty:              dirty,
-		Lines:              lines,
+		LatestBundleMode:      string(assessment.Mode),
+		LatestBundleIntegrity: assessment.Integrity,
+		LatestBundleHint:      assessment.Hint,
+		LatestLockHint:        lockHint,
+		Dirty:                 dirty,
+		Lines:                 lines,
 	}, nil
 }
 

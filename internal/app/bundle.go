@@ -1,0 +1,216 @@
+package app
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/jcpsimmons/room/internal/fsutil"
+)
+
+type bundleMode string
+
+const (
+	bundleModeDryRun   bundleMode = "dry_run"
+	bundleModeExecuted  bundleMode = "executed"
+	bundleModeLegacy    bundleMode = "legacy"
+	bundleIntegrityOK   = "verified"
+	bundleIntegrityWarn = "unverified"
+	bundleIntegrityBad  = "mismatch"
+)
+
+type bundleArtifact struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+type bundleManifest struct {
+	RunDir    string          `json:"run_dir"`
+	Mode      bundleMode      `json:"mode"`
+	CreatedAt time.Time       `json:"created_at"`
+	Artifacts []bundleArtifact `json:"artifacts"`
+}
+
+type bundleAssessment struct {
+	RunDir     string
+	Mode       bundleMode
+	Integrity  string
+	Hint       string
+	ManifestOK bool
+}
+
+func writeBundleManifest(runDir string, mode bundleMode, artifactNames []string) error {
+	manifest := bundleManifest{
+		RunDir:    runDir,
+		Mode:      mode,
+		CreatedAt: time.Now().UTC(),
+	}
+	for _, name := range artifactNames {
+		artifactPath := filepath.Join(runDir, name)
+		data, err := os.ReadFile(artifactPath)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		manifest.Artifacts = append(manifest.Artifacts, bundleArtifact{
+			Name:   name,
+			Size:   int64(len(data)),
+			SHA256: hex.EncodeToString(sum[:]),
+		})
+	}
+	sort.Slice(manifest.Artifacts, func(i, j int) bool {
+		return manifest.Artifacts[i].Name < manifest.Artifacts[j].Name
+	})
+
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return fsutil.AtomicWriteFile(filepath.Join(runDir, "bundle.json"), data, 0o644)
+}
+
+func readBundleManifest(runDir string) (bundleManifest, bool, error) {
+	data, err := fsutil.ReadFileIfExists(filepath.Join(runDir, "bundle.json"))
+	if err != nil {
+		return bundleManifest{}, false, err
+	}
+	if len(data) == 0 {
+		return bundleManifest{}, false, nil
+	}
+
+	var manifest bundleManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return bundleManifest{}, false, err
+	}
+	return manifest, true, nil
+}
+
+func assessNewestBundle(runsDir string) (bundleAssessment, error) {
+	latestRunDir, err := latestRunBundle(runsDir)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "no ROOM run bundles found in ") {
+			return bundleAssessment{}, nil
+		}
+		return bundleAssessment{}, err
+	}
+
+	assessment := bundleAssessment{
+		RunDir:    latestRunDir,
+		Mode:      bundleModeLegacy,
+		Integrity: bundleIntegrityWarn,
+	}
+
+	manifest, ok, err := readBundleManifest(latestRunDir)
+	if err != nil {
+		assessment.Integrity = bundleIntegrityBad
+		assessment.Hint = fmt.Sprintf("Hint: newest bundle %s has an unreadable manifest: %v.", filepath.Base(latestRunDir), err)
+		return assessment, nil
+	}
+	if !ok {
+		missing := missingBundleArtifacts(latestRunDir, bundleModeExecuted)
+		if len(missing) > 0 {
+			assessment.Integrity = bundleIntegrityWarn
+			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is incomplete; missing %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+		}
+		return assessment, nil
+	}
+
+	assessment.Mode = manifest.Mode
+	switch manifest.Mode {
+	case bundleModeDryRun:
+		missing := missingBundleArtifacts(latestRunDir, bundleModeDryRun)
+		if len(missing) > 0 {
+			assessment.Integrity = bundleIntegrityBad
+			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is missing dry-run prompt artifact(s): %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+			return assessment, nil
+		}
+	case bundleModeExecuted, bundleModeLegacy:
+		missing := missingBundleArtifacts(latestRunDir, bundleModeExecuted)
+		if len(missing) > 0 {
+			assessment.Integrity = bundleIntegrityWarn
+			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is incomplete; missing %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+			return assessment, nil
+		}
+	default:
+		missing := missingBundleArtifacts(latestRunDir, bundleModeExecuted)
+		if len(missing) > 0 {
+			assessment.Integrity = bundleIntegrityWarn
+			assessment.Hint = fmt.Sprintf("Hint: newest bundle %s is incomplete; missing %s.", filepath.Base(latestRunDir), strings.Join(missing, " and "))
+			return assessment, nil
+		}
+	}
+
+	if err := verifyBundleManifest(latestRunDir, manifest); err != nil {
+		assessment.Integrity = bundleIntegrityBad
+		assessment.Hint = fmt.Sprintf("Hint: newest bundle %s failed integrity check: %v.", filepath.Base(latestRunDir), err)
+		return assessment, nil
+	}
+
+	assessment.Integrity = bundleIntegrityOK
+	assessment.ManifestOK = true
+	return assessment, nil
+}
+
+func verifyBundleManifest(runDir string, manifest bundleManifest) error {
+	seen := make(map[string]bundleArtifact, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		seen[artifact.Name] = artifact
+	}
+
+	for _, artifact := range manifest.Artifacts {
+		path := filepath.Join(runDir, artifact.Name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("%s missing", artifact.Name)
+		}
+		if int64(len(data)) != artifact.Size {
+			return fmt.Errorf("%s size changed", artifact.Name)
+		}
+		sum := sha256.Sum256(data)
+		if hex.EncodeToString(sum[:]) != artifact.SHA256 {
+			return fmt.Errorf("%s checksum changed", artifact.Name)
+		}
+	}
+
+	for _, name := range expectedBundleArtifacts(manifest.Mode) {
+		if _, ok := seen[name]; !ok {
+			return fmt.Errorf("%s missing from manifest", name)
+		}
+	}
+
+	return nil
+}
+
+func missingBundleArtifacts(runDir string, mode bundleMode) []string {
+	missing := make([]string, 0, 3)
+	for _, name := range expectedBundleArtifacts(mode) {
+		if !fsutil.FileExists(filepath.Join(runDir, name)) {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func expectedBundleArtifacts(mode bundleMode) []string {
+	switch mode {
+	case bundleModeDryRun:
+		return []string{"prompt.txt"}
+	default:
+		return []string{
+			"prompt.txt",
+			"execution.json",
+			"stdout.log",
+			"stderr.log",
+			"result.json",
+			"diff.patch",
+		}
+	}
+}

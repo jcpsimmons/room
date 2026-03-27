@@ -21,12 +21,14 @@ type TailOptions struct {
 }
 
 type TailReport struct {
-	RepoRoot string        `json:"repo_root"`
-	RunDir   string        `json:"run_dir"`
-	Prompt   string        `json:"prompt"`
-	Result   *agent.Result `json:"result,omitempty"`
-	Diff     git.DiffStats `json:"diff"`
-	Lines    []string      `json:"lines"`
+	RepoRoot          string        `json:"repo_root"`
+	RunDir            string        `json:"run_dir"`
+	BundleMode        string        `json:"bundle_mode,omitempty"`
+	BundleIntegrity   string        `json:"bundle_integrity,omitempty"`
+	Prompt            string        `json:"prompt"`
+	Result            *agent.Result `json:"result,omitempty"`
+	Diff              git.DiffStats `json:"diff"`
+	Lines             []string      `json:"lines"`
 }
 
 func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error) {
@@ -39,10 +41,14 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		return TailReport{}, err
 	}
 
-	runDir, err := latestRunBundle(paths.RunsDir)
+	assessment, err := assessNewestBundle(paths.RunsDir)
 	if err != nil {
 		return TailReport{}, err
 	}
+	if assessment.RunDir == "" {
+		return TailReport{}, fmt.Errorf("no ROOM run bundles found in %s", paths.RunsDir)
+	}
+	runDir := assessment.RunDir
 
 	promptPath := filepath.Join(runDir, "prompt.txt")
 	promptBody, err := os.ReadFile(promptPath)
@@ -61,10 +67,17 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 
 	lines := []string{
 		fmt.Sprintf("Latest ROOM bundle: %s", runDir),
+		fmt.Sprintf("Bundle mode: %s", assessment.Mode),
+		fmt.Sprintf("Bundle integrity: %s", assessment.Integrity),
+	}
+	if assessment.Hint != "" {
+		lines = append(lines, assessment.Hint)
+	}
+	lines = append(lines,
 		"Prompt:",
 		indent(strings.TrimSpace(string(promptBody))),
 		"Result:",
-	}
+	)
 	if hasResult {
 		lines = append(lines,
 			indent(fmt.Sprintf("summary: %s", result.Summary)),
@@ -87,12 +100,14 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	}
 
 	return TailReport{
-		RepoRoot: repoRoot,
-		RunDir:   runDir,
-		Prompt:   strings.TrimSpace(string(promptBody)),
-		Result:   resultIfPresent(result, hasResult),
-		Diff:     statsIfPresent(stats, hasStats),
-		Lines:    lines,
+		RepoRoot:        repoRoot,
+		RunDir:          runDir,
+		BundleMode:      string(assessment.Mode),
+		BundleIntegrity: assessment.Integrity,
+		Prompt:          strings.TrimSpace(string(promptBody)),
+		Result:          resultIfPresent(result, hasResult),
+		Diff:            statsIfPresent(stats, hasStats),
+		Lines:           lines,
 	}, nil
 }
 

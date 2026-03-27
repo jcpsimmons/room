@@ -145,11 +145,11 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: "ROOM is not initialized yet; `room init` will create state files"})
 	}
 
-	latestRunDir, bundleHint, err := newestBundleHint(paths.RunsDir)
+	assessment, err := assessNewestBundle(paths.RunsDir)
 	if err != nil {
 		checks = append(checks, DoctorCheck{Name: "bundle", OK: false, Message: err.Error()})
-	} else if bundleHint != "" {
-		checks = append(checks, DoctorCheck{Name: "bundle", OK: false, Message: bundleHint})
+	} else if assessment.Hint != "" {
+		checks = append(checks, DoctorCheck{Name: "bundle", OK: false, Message: assessment.Hint})
 	}
 	lockHint, err := runLockHint(paths.RoomDir, s.processAlive)
 	if err != nil {
@@ -157,15 +157,15 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	} else if lockHint != "" {
 		checks = append(checks, DoctorCheck{Name: "run_lock", OK: false, Message: lockHint})
 	}
-	if latestRunDir != "" && fsutil.FileExists(paths.StatePath) {
+	if assessment.RunDir != "" && fsutil.FileExists(paths.StatePath) {
 		snapshot, err := state.Load(paths.StatePath)
 		if err != nil {
 			checks = append(checks, DoctorCheck{Name: "run_directory", OK: false, Message: fmt.Sprintf("state load failed: %v", err)})
-		} else if lastRunDir := strings.TrimSpace(snapshot.LastRunDirectory); lastRunDir != "" && filepath.Clean(lastRunDir) != filepath.Clean(latestRunDir) {
+		} else if lastRunDir := strings.TrimSpace(snapshot.LastRunDirectory); lastRunDir != "" && filepath.Clean(lastRunDir) != filepath.Clean(assessment.RunDir) {
 			checks = append(checks, DoctorCheck{
 				Name:    "run_directory",
 				OK:      false,
-				Message: fmt.Sprintf("state points at %s but newest bundle is %s", lastRunDir, latestRunDir),
+				Message: fmt.Sprintf("state points at %s but newest bundle is %s", lastRunDir, assessment.RunDir),
 			})
 		}
 	}

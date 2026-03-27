@@ -100,9 +100,9 @@ curl -fsSL https://raw.githubusercontent.com/jcpsimmons/room/main/scripts/instal
 room init
 room doctor
 room inspect
-room tail
-room run --iterations 5
-room status
+	room tail
+	room run --iterations 5
+	room status
 ```
 
 To start from a real task instead of the default seed prompt:
@@ -226,11 +226,13 @@ ROOM stores all local orchestration state in `.room/`.
       stdout.log
       stderr.log
       diff.patch
+      bundle.json
 ```
 
 This is local state by design. It makes the loop inspectable, resumable, and debuggable without relying on provider session resume.
 ROOM ignores `.room/` in its own dirty checks, diffs, and auto-commits so local state does not contaminate repo improvement runs. If you also want plain `git status` to stay clean, add `.room/` to `.git/info/exclude` or `.gitignore`.
 ROOM also reads a repo-root `.roomignore` file. Use gitignore-style patterns there for files ROOM should ignore in its own status checks, diffs, and auto-commits without changing your repository's normal Git ignore rules.
+Each run bundle also carries a `bundle.json` manifest with artifact hashes so `room tail`, `room status`, and `room doctor` can tell intentional dry runs apart from truncated or mutated bundles.
 
 ## How ROOM Decides What To Do Next
 
