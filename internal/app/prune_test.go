@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/state"
 	"github.com/jcpsimmons/room/internal/version"
 )
 
@@ -128,5 +129,81 @@ func TestPruneDryRunLeavesBundlesIntact(t *testing.T) {
 	}
 	if !strings.Contains(joined, "Dry run only; nothing was deleted.") {
 		t.Fatalf("prune dry-run output missing dry-run note:\n%s", joined)
+	}
+}
+
+func TestPrunePreservesStateReferencedBundle(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	writeTailBundle(t, paths.RunsDir, "0001", "prompt one", &agent.Result{
+		Summary:         "one",
+		NextInstruction: "two",
+		Status:          "continue",
+		CommitMessage:   "one",
+	}, "")
+	writeTailBundle(t, paths.RunsDir, "0002", "prompt two", &agent.Result{
+		Summary:         "two",
+		NextInstruction: "three",
+		Status:          "continue",
+		CommitMessage:   "two",
+	}, "")
+	writeTailBundle(t, paths.RunsDir, "0003", "prompt three", &agent.Result{
+		Summary:         "three",
+		NextInstruction: "four",
+		Status:          "continue",
+		CommitMessage:   "three",
+	}, "")
+	writeTailBundle(t, paths.RunsDir, "0004", "prompt four", &agent.Result{
+		Summary:         "four",
+		NextInstruction: "five",
+		Status:          "continue",
+		CommitMessage:   "four",
+	}, "")
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.LastRunDirectory = filepath.Join(paths.RunsDir, "0002")
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     &fakeGit{root: repoRoot},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Prune(context.Background(), PruneOptions{
+		WorkingDir: repoRoot,
+		Keep:       2,
+	})
+	if err != nil {
+		t.Fatalf("prune with protected bundle: %v", err)
+	}
+	if len(report.Removed) != 1 || !strings.HasSuffix(report.Removed[0], filepath.Join("0001")) {
+		t.Fatalf("removed bundles = %#v", report.Removed)
+	}
+	if len(report.Kept) != 3 {
+		t.Fatalf("kept bundles = %#v", report.Kept)
+	}
+	for _, name := range []string{"0002", "0003", "0004"} {
+		if _, err := os.Stat(filepath.Join(paths.RunsDir, name)); err != nil {
+			t.Fatalf("expected %s to remain: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(paths.RunsDir, "0001")); !os.IsNotExist(err) {
+		t.Fatalf("expected 0001 to be pruned, stat err=%v", err)
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"removed " + filepath.Join(paths.RunsDir, "0001"),
+		"kept " + filepath.Join(paths.RunsDir, "0002") + " (referenced by state.json)",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("prune output missing %q:\n%s", want, joined)
+		}
 	}
 }

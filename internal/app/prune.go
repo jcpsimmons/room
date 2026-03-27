@@ -5,6 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/jcpsimmons/room/internal/state"
 )
 
 type PruneOptions struct {
@@ -43,6 +47,11 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		return PruneReport{}, err
 	}
 
+	protectedRunDir := ""
+	if snapshot, err := state.Load(paths.StatePath); err == nil {
+		protectedRunDir = strings.TrimSpace(snapshot.LastRunDirectory)
+	}
+
 	report := PruneReport{
 		RepoRoot: repoRoot,
 		RunsDir:  paths.RunsDir,
@@ -63,28 +72,47 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		return report, nil
 	}
 
-	if len(bundles) <= opts.Keep {
-		for _, bundle := range bundles {
-			report.Kept = append(report.Kept, bundle.path)
+	protectedBundle := ""
+	if protectedRunDir != "" {
+		protectedBundle = filepath.Clean(protectedRunDir)
+	}
+
+	kept := make([]string, 0, opts.Keep+1)
+	var removals []runBundle
+	for i, bundle := range bundles {
+		if i < opts.Keep {
+			kept = append(kept, bundle.path)
+			continue
 		}
-		lines = append(lines, "Nothing to prune.")
+		if protectedBundle != "" && filepath.Clean(bundle.path) == protectedBundle {
+			kept = append(kept, bundle.path)
+			continue
+		}
+		removals = append(removals, bundle)
+	}
+	report.Kept = kept
+
+	action := "removed"
+	if opts.DryRun {
+		action = "would remove"
+	}
+	if len(removals) == 0 {
+		if protectedBundle != "" {
+			lines = append(lines, "Nothing to prune; state.json keeps an older bundle alive.")
+		} else {
+			lines = append(lines, "Nothing to prune.")
+		}
 		for _, kept := range report.Kept {
+			if protectedBundle != "" && filepath.Clean(kept) == protectedBundle {
+				lines = append(lines, "kept "+kept+" (referenced by state.json)")
+				continue
+			}
 			lines = append(lines, "kept "+kept)
 		}
 		report.Lines = lines
 		return report, nil
 	}
 
-	report.Kept = make([]string, 0, opts.Keep)
-	for _, bundle := range bundles[:opts.Keep] {
-		report.Kept = append(report.Kept, bundle.path)
-	}
-
-	removals := bundles[opts.Keep:]
-	action := "removed"
-	if opts.DryRun {
-		action = "would remove"
-	}
 	lines = append(lines, fmt.Sprintf("%s %d older bundle(s).", action, len(removals)))
 	for _, bundle := range removals {
 		if !opts.DryRun {
@@ -99,6 +127,10 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		lines = append(lines, "Dry run only; nothing was deleted.")
 	}
 	for _, kept := range report.Kept {
+		if protectedBundle != "" && filepath.Clean(kept) == protectedBundle {
+			lines = append(lines, "kept "+kept+" (referenced by state.json)")
+			continue
+		}
 		lines = append(lines, "kept "+kept)
 	}
 	report.Lines = lines
