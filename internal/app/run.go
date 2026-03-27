@@ -477,6 +477,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			NextInstruction:      execution.Result.NextInstruction,
 			PriorInstructions:    priorInstructions,
 			RecentSummaries:      summaries,
+			RecentCommits:        commits,
 			ConsecutiveNoChange:  snapshot.ConsecutiveNoChange,
 			ConsecutiveTinyDiffs: snapshot.ConsecutiveTinyDiffs,
 		})

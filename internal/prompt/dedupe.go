@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
+	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/logs"
 )
 
@@ -13,6 +15,7 @@ type DedupeInput struct {
 	NextInstruction      string
 	PriorInstructions    []string
 	RecentSummaries      []logs.SummaryEntry
+	RecentCommits        []git.Commit
 	ConsecutiveNoChange  int
 	ConsecutiveTinyDiffs int
 }
@@ -48,8 +51,8 @@ func DetectStagnation(input DedupeInput) DedupeResult {
 	if repeatedChurn(next, input.RecentSummaries) {
 		return pivot(next, "repeated docs/tests/refactor churn without enough novelty", "")
 	}
-	if repeatedFocus(next, input.PriorInstructions) {
-		return pivot(next, "repeated subsystem focus across recent runs", "")
+	if focus := repeatedFocus(next, input.PriorInstructions, input.RecentSummaries, input.RecentCommits); len(focus) > 0 {
+		return pivot(next, "repeated subsystem focus across recent runs", "", focus)
 	}
 	if input.ConsecutiveNoChange >= 2 {
 		return pivot(next, fmt.Sprintf("%d consecutive no-change iterations", input.ConsecutiveNoChange), "")
@@ -60,8 +63,12 @@ func DetectStagnation(input DedupeInput) DedupeResult {
 	return DedupeResult{}
 }
 
-func BuildPivotInstruction(reason string) string {
-	return fmt.Sprintf("Pivot hard. The prior direction is stagnating because of %s. Choose a distinctly different improvement direction. Avoid cosmetic churn. Pick another subsystem, validation layer, reliability measure, performance angle, developer-experience improvement, diagnostics capability, accessibility issue, or tooling improvement. If conventional ideas are exhausted, choose a creative but still concrete improvement.", reason)
+func BuildPivotInstruction(reason string, avoid []string) string {
+	base := fmt.Sprintf("Pivot hard. The prior direction is stagnating because of %s. Choose a distinctly different improvement direction. Avoid cosmetic churn. Pick another subsystem, validation layer, reliability measure, performance angle, developer-experience improvement, diagnostics capability, accessibility issue, or tooling improvement. If conventional ideas are exhausted, choose a creative but still concrete improvement.", reason)
+	if len(avoid) == 0 {
+		return base
+	}
+	return base + " Avoid these recently saturated modules: " + strings.Join(avoid, ", ") + "."
 }
 
 func normalize(value string) string {
@@ -118,24 +125,53 @@ func repeatedChurn(next string, summaries []logs.SummaryEntry) bool {
 	return recent >= 2
 }
 
-func repeatedFocus(next string, prior []string) bool {
+func repeatedFocus(next string, prior []string, summaries []logs.SummaryEntry, commits []git.Commit) []string {
 	tokens := informativeTokens(next)
 	if len(tokens) == 0 {
-		return false
+		return nil
 	}
-	matches := 0
-	for _, item := range prior {
+	counts := make(map[string]int, len(tokens))
+	order := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		order = append(order, token)
+	}
+	for _, item := range focusEvidence(prior, summaries, commits) {
 		other := informativeTokens(normalize(item))
-		if overlap(tokens, other) >= 2 {
-			matches++
+		if len(other) == 0 {
+			continue
+		}
+		shared := overlappingTokens(tokens, other)
+		if len(shared) < 2 {
+			continue
+		}
+		for _, token := range shared {
+			counts[token]++
 		}
 	}
-	return matches >= 2
+	var saturated []string
+	for _, token := range order {
+		if counts[token] >= 2 {
+			saturated = append(saturated, token)
+		}
+	}
+	if len(saturated) == 0 {
+		return nil
+	}
+	sort.SliceStable(saturated, func(i, j int) bool {
+		if counts[saturated[i]] == counts[saturated[j]] {
+			return saturated[i] < saturated[j]
+		}
+		return counts[saturated[i]] > counts[saturated[j]]
+	})
+	if len(saturated) > 3 {
+		saturated = saturated[:3]
+	}
+	return saturated
 }
 
 func informativeTokens(text string) []string {
 	stop := map[string]struct{}{
-		"the": {}, "and": {}, "for": {}, "with": {}, "that": {}, "from": {}, "this": {}, "repo": {}, "repository": {}, "improve": {}, "improvement": {}, "more": {}, "make": {}, "better": {}, "add": {}, "update": {}, "room": {}, "tests": {}, "test": {}, "docs": {}, "documentation": {}, "refactor": {}, "cleanup": {}, "performance": {}, "reliability": {}, "tooling": {}, "developer": {}, "experience": {},
+		"the": {}, "and": {}, "for": {}, "with": {}, "that": {}, "from": {}, "this": {}, "repo": {}, "repository": {}, "improve": {}, "improvement": {}, "more": {}, "make": {}, "better": {}, "add": {}, "update": {}, "room": {}, "tests": {}, "test": {}, "docs": {}, "documentation": {}, "refactor": {}, "cleanup": {}, "performance": {}, "reliability": {}, "tooling": {}, "developer": {}, "experience": {}, "recent": {}, "runs": {}, "across": {}, "hard": {}, "avoid": {}, "choose": {}, "distinctly": {}, "different": {}, "direction": {}, "validation": {}, "layer": {}, "measure": {}, "angle": {}, "diagnostics": {}, "capability": {}, "accessibility": {}, "issue": {}, "creative": {}, "concrete": {},
 	}
 	var out []string
 	for _, token := range strings.Fields(text) {
@@ -153,17 +189,21 @@ func informativeTokens(text string) []string {
 }
 
 func overlap(a, b []string) int {
+	return len(overlappingTokens(a, b))
+}
+
+func overlappingTokens(a, b []string) []string {
 	set := make(map[string]struct{}, len(a))
 	for _, token := range a {
 		set[token] = struct{}{}
 	}
-	count := 0
+	var shared []string
 	for _, token := range b {
 		if _, ok := set[token]; ok {
-			count++
+			shared = append(shared, token)
 		}
 	}
-	return count
+	return shared
 }
 
 func containsAny(text string, terms []string) bool {
@@ -175,11 +215,27 @@ func containsAny(text string, terms []string) bool {
 	return false
 }
 
-func pivot(next, reason, matched string) DedupeResult {
+func focusEvidence(prior []string, summaries []logs.SummaryEntry, commits []git.Commit) []string {
+	items := make([]string, 0, len(prior)+len(summaries)+len(commits))
+	items = append(items, prior...)
+	for _, summary := range summaries {
+		items = append(items, summary.Summary)
+	}
+	for _, commit := range commits {
+		items = append(items, commit.Subject)
+	}
+	return items
+}
+
+func pivot(next, reason, matched string, avoid ...[]string) DedupeResult {
+	var saturated []string
+	if len(avoid) > 0 {
+		saturated = avoid[0]
+	}
 	return DedupeResult{
 		ShouldPivot:   true,
 		Reasons:       []string{reason},
-		Replacement:   BuildPivotInstruction(reason),
+		Replacement:   BuildPivotInstruction(reason, saturated),
 		MatchedTarget: matched,
 	}
 }

@@ -162,7 +162,7 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		} else {
 			currentInstruction = strings.TrimSpace(string(instructionBody))
 		}
-		promptHistoryHint, _ = promptHistorySignal(currentInstruction, priorInstructions, recentSummaries)
+		promptHistoryHint, _ = promptHistorySignal(currentInstruction, priorInstructions, recentSummaries, nil)
 		if promptHistoryHint != "" {
 			checks = append(checks, DoctorCheck{Name: "prompt_history", OK: false, Message: promptHistoryHint})
 		}

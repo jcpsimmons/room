@@ -146,7 +146,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if instructionHint != "" {
 		lines = append(lines, instructionHint)
 	}
-	promptHistoryHint, _ := promptHistorySignal(currentInstruction, priorInstructions, summaries)
+	promptHistoryHint, _ := promptHistorySignal(currentInstruction, priorInstructions, summaries, commits)
 	if promptHistoryHint != "" {
 		lines = append(lines, promptHistoryHint)
 	}
