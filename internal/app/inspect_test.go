@@ -164,3 +164,56 @@ func TestInspectReportsPromptStats(t *testing.T) {
 		t.Fatalf("recent commits count = %d", report.PromptStats.RecentCommitsCount)
 	}
 }
+
+func TestInspectRedactsSensitivePromptContext(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	secretInstruction := strings.TrimSpace(`
+export OPENAI_API_KEY=sk-test-1234567890abcdef1234567890
+AWS_SECRET_ACCESS_KEY=abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+github_pat_abcdefghijklmnopqrstuvwxyz0123456789
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+-----END PRIVATE KEY-----
+`)
+	if err := os.WriteFile(paths.InstructionPath, []byte(secretInstruction+"\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:        repoRoot,
+			statusShort: " M a.txt",
+			recentCommits: []git.Commit{{
+				Hash:    "abc123",
+				Subject: "Stop leaking sk-test-1234567890abcdef1234567890",
+			}},
+		},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Inspect(context.Background(), InspectOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+
+	for _, want := range []string{
+		"<redacted>",
+		"<redacted private key>",
+	} {
+		if !strings.Contains(report.Prompt, want) {
+			t.Fatalf("inspect prompt missing %q:\n%s", want, report.Prompt)
+		}
+	}
+	for _, want := range []string{
+		"sk-test-1234567890abcdef1234567890",
+		"abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd",
+		"github_pat_abcdefghijklmnopqrstuvwxyz0123456789",
+		"MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+	} {
+		if strings.Contains(report.Prompt, want) {
+			t.Fatalf("inspect prompt leaked %q:\n%s", want, report.Prompt)
+		}
+	}
+}

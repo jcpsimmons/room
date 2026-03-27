@@ -192,6 +192,67 @@ func TestRunUsesCombinedDiffAndStats(t *testing.T) {
 	}
 }
 
+func TestRunRedactsSensitivePromptContext(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	secretInstruction := strings.TrimSpace(`
+export OPENAI_API_KEY=sk-test-1234567890abcdef1234567890
+AWS_SECRET_ACCESS_KEY=abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd
+github_pat_abcdefghijklmnopqrstuvwxyz0123456789
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+-----END PRIVATE KEY-----
+`)
+	if err := os.WriteFile(paths.InstructionPath, []byte(secretInstruction+"\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     &fakeGit{root: repoRoot},
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+		Providers: testProviders(&fakeRunner{
+			version: "codex-cli 0.116.0",
+			runs:    nil,
+		}, nil),
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		DryRun:     true,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	promptData, err := os.ReadFile(filepath.Join(report.LastRunDir, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("read prompt: %v", err)
+	}
+	promptText := string(promptData)
+
+	for _, want := range []string{
+		"<redacted>",
+		"<redacted private key>",
+	} {
+		if !strings.Contains(promptText, want) {
+			t.Fatalf("run prompt missing %q:\n%s", want, promptText)
+		}
+	}
+	for _, want := range []string{
+		"sk-test-1234567890abcdef1234567890",
+		"abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd",
+		"github_pat_abcdefghijklmnopqrstuvwxyz0123456789",
+		"MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+	} {
+		if strings.Contains(promptText, want) {
+			t.Fatalf("run prompt leaked %q:\n%s", want, promptText)
+		}
+	}
+}
+
 func TestRunRefusesAnActiveRunLock(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, paths := prepareInitializedRepo(t, repoRoot)

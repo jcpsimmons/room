@@ -32,6 +32,7 @@ func Build(input BuildInput) string {
 }
 
 func BuildDetailed(input BuildInput) (string, BuildReport) {
+	input = redactBuildInput(input)
 	var b strings.Builder
 	report := BuildReport{
 		CurrentInstructionRunes: len([]rune(strings.TrimSpace(input.CurrentInstruction))),
@@ -187,4 +188,19 @@ func compactGitStatusReport(text string, maxLines, maxLineRunes int) (string, gi
 		lines = append(lines, fmt.Sprintf("... (+%d more lines)", omitted))
 	}
 	return strings.Join(lines, "\n"), report
+}
+
+func redactBuildInput(input BuildInput) BuildInput {
+	input.CurrentInstruction = redactSensitiveText(input.CurrentInstruction)
+	input.RecoveryHint = redactSensitiveText(input.RecoveryHint)
+	for i := range input.RecentSummaries {
+		input.RecentSummaries[i].Summary = redactSensitiveText(input.RecentSummaries[i].Summary)
+	}
+	for i := range input.PriorInstructions {
+		input.PriorInstructions[i] = redactSensitiveText(input.PriorInstructions[i])
+	}
+	for i := range input.RecentCommits {
+		input.RecentCommits[i].Subject = redactSensitiveText(input.RecentCommits[i].Subject)
+	}
+	return input
 }

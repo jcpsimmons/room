@@ -159,3 +159,63 @@ func TestBuildDetailedReportsPromptSaturation(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRedactsObviousSecrets(t *testing.T) {
+	t.Parallel()
+
+	openAIKey := "sk-" + strings.Repeat("t", 28)
+	awsSecret := strings.Repeat("a", 40)
+	npmToken := "npm-secret-" + strings.Repeat("7", 12)
+	githubPAT := "github_pat_" + strings.Repeat("g", 36)
+	githubClassicToken := "ghp_" + strings.Repeat("h", 36)
+	slackToken := "xoxb-" + strings.Repeat("1", 10) + "-" + strings.Repeat("2", 16)
+
+	privateKey := strings.TrimSpace(`
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+-----END PRIVATE KEY-----
+`)
+	body := Build(BuildInput{
+		CurrentInstruction: strings.Join([]string{
+			"Inspect the local credential dump",
+			"export OPENAI_API_KEY=" + openAIKey,
+			"AWS_SECRET_ACCESS_KEY=" + awsSecret,
+			"//registry.npmjs.org/:_authToken=" + npmToken,
+			githubPAT,
+			privateKey,
+		}, "\n"),
+		RecoveryHint:      "Recovered from env bleed: PASSWORD=super-secret",
+		PriorInstructions: []string{"Rotate the leaked token " + githubClassicToken},
+		RecentSummaries: []logs.SummaryEntry{{
+			Iteration: 1,
+			Summary:   "Summary carried an access token: " + slackToken,
+		}},
+		RecentCommits: []git.Commit{{
+			Hash:    "abc123",
+			Subject: "Stop leaking " + openAIKey,
+		}},
+		RepoPath: "/tmp/repo",
+	})
+
+	for _, want := range []string{
+		"<redacted>",
+		"<redacted private key>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected prompt to contain %q", want)
+		}
+	}
+	for _, want := range []string{
+		openAIKey,
+		awsSecret,
+		npmToken,
+		githubPAT,
+		"PASSWORD=super-secret",
+		githubClassicToken,
+		slackToken,
+	} {
+		if strings.Contains(body, want) {
+			t.Fatalf("expected prompt to redact %q:\n%s", want, body)
+		}
+	}
+}
