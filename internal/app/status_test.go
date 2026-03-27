@@ -201,6 +201,33 @@ func TestStatusSurvivesMissingInstructionFile(t *testing.T) {
 	}
 }
 
+func TestStatusSurfacesBlankInstructionFile(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("\n \n"), 0o644); err != nil {
+		t.Fatalf("blank instruction: %v", err)
+	}
+	writeTailBundle(t, paths.RunsDir, "0001", "newest prompt", nil, "")
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.CurrentInstruction != "Current instruction unavailable: instruction.txt is blank." {
+		t.Fatalf("current instruction = %q", report.CurrentInstruction)
+	}
+	if !strings.Contains(strings.Join(report.Lines, "\n"), "instruction.txt is blank") {
+		t.Fatalf("status lines missing blank-instruction hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}
+
 func TestStatusSurfacesPromptHistoryStagnation(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -299,7 +298,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			return RunReport{}, err
 		}
 
-		currentInstruction, err := readTrimmed(paths.InstructionPath)
+		currentInstruction, err := requireInstructionSignal(paths.InstructionPath)
 		if err != nil {
 			return RunReport{}, err
 		}
@@ -701,14 +700,6 @@ func (s *Service) loadConfig(ctx context.Context, repoRoot, override string) (co
 		}
 	}
 	return cfg, paths, nil
-}
-
-func readTrimmed(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
 }
 
 func nextRunIteration(runsDir string, stateIteration int) (int, string, error) {

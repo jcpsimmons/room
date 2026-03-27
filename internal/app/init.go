@@ -64,7 +64,7 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		}
 	}
 	if !fsutil.FileExists(paths.StatePath) {
-		currentInstruction, err := readTrimmed(paths.InstructionPath)
+		currentInstruction, err := requireInstructionSignal(paths.InstructionPath)
 		if err != nil {
 			return InitReport{}, err
 		}

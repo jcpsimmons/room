@@ -122,6 +122,39 @@ func TestInspectSurvivesMissingInstructionFile(t *testing.T) {
 	}
 }
 
+func TestInspectSurfacesBlankInstructionFile(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("\n \n"), 0o644); err != nil {
+		t.Fatalf("blank instruction: %v", err)
+	}
+	writeTailBundle(t, paths.RunsDir, "0001", "newest prompt", nil, "")
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:        repoRoot,
+			statusShort: " M a.txt",
+		},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Inspect(context.Background(), InspectOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+
+	if report.CurrentInstruction != "" {
+		t.Fatalf("current instruction = %q", report.CurrentInstruction)
+	}
+	if !strings.Contains(report.RecoveryHint, "instruction.txt is blank") {
+		t.Fatalf("recovery hint = %q", report.RecoveryHint)
+	}
+	if !strings.Contains(report.Prompt, "instruction.txt is blank") {
+		t.Fatalf("prompt missing blank-instruction hint:\n%s", report.Prompt)
+	}
+}
+
 func TestInspectReportsPromptStats(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

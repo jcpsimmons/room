@@ -140,6 +140,13 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	} else {
 		checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: "ROOM is not initialized yet; `room init` will create state files"})
 	}
+	if instruction, err := loadInstructionSignal(paths.InstructionPath); err != nil {
+		checks = append(checks, DoctorCheck{Name: "instruction", OK: false, Message: fmt.Sprintf("instruction read failed: %v", err)})
+	} else if strings.TrimSpace(instruction.Hint) != "" {
+		checks = append(checks, DoctorCheck{Name: "instruction", OK: false, Message: instruction.Hint})
+	} else {
+		checks = append(checks, DoctorCheck{Name: "instruction", OK: true, Message: "instruction.txt is ready"})
+	}
 
 	recentSummaries, malformedSummaries, err := logs.ReadRecentSummariesDetailed(paths.SummariesPath, cfg.Prompt.MaxRecentSummaries)
 	if err != nil {
@@ -160,10 +167,10 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		checks = append(checks, DoctorCheck{Name: "prompt_history", OK: false, Message: fmt.Sprintf("seen instruction history read failed: %v", err)})
 	} else {
 		currentInstruction := ""
-		if instructionBody, readErr := fsutil.ReadFileIfExists(paths.InstructionPath); readErr != nil {
+		if instructionSignal, readErr := loadInstructionSignal(paths.InstructionPath); readErr != nil {
 			checks = append(checks, DoctorCheck{Name: "prompt_history", OK: false, Message: fmt.Sprintf("current instruction read failed: %v", readErr)})
 		} else {
-			currentInstruction = strings.TrimSpace(string(instructionBody))
+			currentInstruction = instructionSignal.Body
 		}
 		promptHistoryHint, _ = promptHistorySignal(currentInstruction, priorInstructions, recentSummaries, nil)
 		if promptHistoryHint != "" {

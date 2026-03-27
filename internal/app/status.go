@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
-	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/state"
@@ -57,7 +56,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if err != nil {
 		return StatusReport{}, err
 	}
-	instruction, err := fsutil.ReadFileIfExists(paths.InstructionPath)
+	instructionSignal, err := loadInstructionSignal(paths.InstructionPath)
 	if err != nil {
 		return StatusReport{}, err
 	}
@@ -89,10 +88,9 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if err != nil {
 		return StatusReport{}, err
 	}
-	currentInstruction := strings.TrimSpace(string(instruction))
-	instructionHint := ""
-	if !fsutil.FileExists(paths.InstructionPath) {
-		instructionHint = "Current instruction unavailable: missing instruction.txt."
+	currentInstruction := instructionSignal.Body
+	instructionHint := instructionSignal.Hint
+	if instructionHint != "" {
 		currentInstruction = instructionHint
 	}
 	providerDiag := s.providerDiagnostics(ctx, cfg)

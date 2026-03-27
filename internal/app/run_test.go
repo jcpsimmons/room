@@ -257,6 +257,39 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
 	}
 }
 
+func TestRunRejectsBlankInstructionFile(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte(" \n\t\n"), 0o644); err != nil {
+		t.Fatalf("write blank instruction: %v", err)
+	}
+
+	runner := &fakeRunner{version: "codex-cli 0.116.0"}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+		Providers: testProviders(runner, nil),
+	})
+
+	_, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		NoCommit:   true,
+	})
+	if err == nil {
+		t.Fatal("expected blank instruction failure")
+	}
+	if !strings.Contains(err.Error(), "instruction.txt is blank") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner should not be called, got %d calls", runner.calls)
+	}
+}
+
 func TestRunRefusesAnActiveRunLock(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, paths := prepareInitializedRepo(t, repoRoot)

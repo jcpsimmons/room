@@ -283,6 +283,45 @@ func TestDoctorSurfacesMalformedSummaryHistory(t *testing.T) {
 	}
 }
 
+func TestDoctorFlagsBlankInstructionFile(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("\n \n"), 0o644); err != nil {
+		t.Fatalf("blank instruction: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name == "instruction" {
+			found = true
+			if check.OK {
+				t.Fatalf("expected instruction check to fail, got %#v", check)
+			}
+			if !strings.Contains(check.Message, "instruction.txt is blank") {
+				t.Fatalf("unexpected instruction check: %#v", check)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected instruction check, got %#v", report.Checks)
+	}
+	if !strings.Contains(strings.Join(report.Lines, "\n"), "instruction.txt is blank") {
+		t.Fatalf("doctor lines missing blank-instruction hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}
+
 func TestDoctorSurfacesMalformedRoomIgnore(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, _ = prepareInitializedRepo(t, repoRoot)
