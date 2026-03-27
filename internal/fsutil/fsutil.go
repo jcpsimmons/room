@@ -43,7 +43,7 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return cleanup(err)
 	}
-	return nil
+	return syncParentDir(path)
 }
 
 func FileExists(path string) bool {
