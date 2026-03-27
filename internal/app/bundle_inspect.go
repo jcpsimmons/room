@@ -75,9 +75,12 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	if err != nil {
 		return BundleReport{}, err
 	}
-	execution, hasExecution, err := readExecutionArtifact(filepath.Join(runDir, "execution.json"))
+	execution, hasExecution, executionWarn, err := readExecutionArtifactLenient(filepath.Join(runDir, "execution.json"))
 	if err != nil {
 		return BundleReport{}, err
+	}
+	if executionWarn != nil {
+		appendArtifactDecodeWarning(&assessment, "bundle", "execution.json", executionWarn)
 	}
 
 	report := BundleReport{

@@ -59,13 +59,19 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		return TailReport{}, err
 	}
 
-	result, hasResult, err := readTailResult(filepath.Join(runDir, "result.json"))
+	result, hasResult, resultWarn, err := readTailResultLenient(filepath.Join(runDir, "result.json"))
 	if err != nil {
 		return TailReport{}, err
 	}
-	execution, hasExecution, err := readExecutionArtifact(filepath.Join(runDir, "execution.json"))
+	if resultWarn != nil {
+		appendArtifactDecodeWarning(&assessment, "newest bundle", "result.json", resultWarn)
+	}
+	execution, hasExecution, executionWarn, err := readExecutionArtifactLenient(filepath.Join(runDir, "execution.json"))
 	if err != nil {
 		return TailReport{}, err
+	}
+	if executionWarn != nil {
+		appendArtifactDecodeWarning(&assessment, "newest bundle", "execution.json", executionWarn)
 	}
 	stats, hasStats, err := readTailDiffStats(filepath.Join(runDir, "diff.patch"))
 	if err != nil {
@@ -205,6 +211,17 @@ func readTailResult(path string) (*agent.Result, bool, error) {
 		return nil, false, err
 	}
 	return &result, true, nil
+}
+
+func readTailResultLenient(path string) (*agent.Result, bool, error, error) {
+	result, ok, err := readTailResult(path)
+	if err == nil {
+		return result, ok, nil, nil
+	}
+	if strings.Contains(err.Error(), "ROOM JSON result") || strings.Contains(err.Error(), "summary is required") || strings.Contains(err.Error(), "next_instruction is required") || strings.Contains(err.Error(), "status must be one of") || strings.Contains(err.Error(), "commit_message is required") {
+		return nil, false, err, nil
+	}
+	return nil, false, nil, err
 }
 
 func readTailDiffStats(path string) (git.DiffStats, bool, error) {

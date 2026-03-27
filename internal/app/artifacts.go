@@ -73,6 +73,17 @@ func readExecutionArtifact(path string) (*executionArtifact, bool, error) {
 	return &artifact, true, nil
 }
 
+func readExecutionArtifactLenient(path string) (*executionArtifact, bool, error, error) {
+	artifact, ok, err := readExecutionArtifact(path)
+	if err == nil {
+		return artifact, ok, nil, nil
+	}
+	if strings.HasPrefix(err.Error(), "malformed execution artifact:") {
+		return nil, false, err, nil
+	}
+	return nil, false, nil, err
+}
+
 func executionReportIfPresent(artifact *executionArtifact, ok bool) *ExecutionReport {
 	if !ok || artifact == nil {
 		return nil

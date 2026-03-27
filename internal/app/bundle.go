@@ -36,6 +36,7 @@ const (
 	bundleIntegrityHintArtifactName       = "manifest_artifact_name_missing"
 	bundleIntegrityHintArtifactDuplicate  = "manifest_artifact_duplicate"
 	bundleIntegrityHintArtifactHash       = "manifest_artifact_hash_invalid"
+	bundleIntegrityHintArtifactUnreadable = "artifact_decode_failed"
 	bundleIntegrityHintFileMissing        = "artifact_file_missing"
 	bundleIntegrityHintSizeChanged        = "artifact_size_changed"
 	bundleIntegrityHintChecksumChanged    = "artifact_hash_changed"
@@ -390,6 +391,28 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) ([]BundleInteg
 	}
 
 	return nil, nil
+}
+
+func appendArtifactDecodeWarning(assessment *bundleAssessment, subject, artifact string, err error) {
+	if assessment == nil || err == nil {
+		return
+	}
+
+	assessment.Hints = append(assessment.Hints, newBundleIntegrityHint(
+		bundleIntegrityHintArtifactUnreadable,
+		strings.TrimSpace(err.Error()),
+		artifact,
+	))
+	if assessment.Integrity == bundleIntegrityOK {
+		assessment.Integrity = bundleIntegrityWarn
+	}
+
+	message := fmt.Sprintf("Hint: %s %s contains unreadable %s: %v.", subject, filepath.Base(assessment.RunDir), artifact, err)
+	if strings.TrimSpace(assessment.Hint) == "" {
+		assessment.Hint = message
+		return
+	}
+	assessment.Hint += " " + message
 }
 
 func missingBundleArtifacts(runDir string, mode bundleMode) []string {

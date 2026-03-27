@@ -199,6 +199,72 @@ diff --git a/b.txt b/b.txt
 			}
 		}
 	})
+
+	t.Run("unreadable artifacts degrade gracefully", func(t *testing.T) {
+		runDir := filepath.Join(paths.RunsDir, "0007")
+		if err := fsutil.EnsureDir(runDir); err != nil {
+			t.Fatalf("ensure run dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "prompt.txt"), []byte("glitch prompt\n"), 0o644); err != nil {
+			t.Fatalf("write prompt: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "result.json"), []byte(`{"summary":"broken"`+"\n"), 0o644); err != nil {
+			t.Fatalf("write malformed result: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "execution.json"), []byte(`{"provider":"","started_at":"2026-03-25T11:00:00Z","finished_at":"2026-03-25T11:00:01Z"}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write malformed execution: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "diff.patch"), []byte("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"), 0o644); err != nil {
+			t.Fatalf("write diff: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "stdout.log"), nil, 0o644); err != nil {
+			t.Fatalf("write stdout: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "stderr.log"), nil, 0o644); err != nil {
+			t.Fatalf("write stderr: %v", err)
+		}
+		if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
+			"prompt.txt",
+			"execution.json",
+			"stdout.log",
+			"stderr.log",
+			"result.json",
+			"diff.patch",
+		}); err != nil {
+			t.Fatalf("write bundle manifest: %v", err)
+		}
+
+		report, err := svc.Tail(context.Background(), TailOptions{WorkingDir: repoRoot})
+		if err != nil {
+			t.Fatalf("tail: %v", err)
+		}
+		if report.BundleIntegrity != bundleIntegrityWarn {
+			t.Fatalf("bundle integrity = %q", report.BundleIntegrity)
+		}
+		if report.Result != nil {
+			t.Fatalf("expected unreadable result to be suppressed, got %#v", report.Result)
+		}
+		if report.Execution != nil {
+			t.Fatalf("expected unreadable execution to be suppressed, got %#v", report.Execution)
+		}
+		if len(report.BundleIntegrityHints) < 2 {
+			t.Fatalf("expected artifact decode hints, got %#v", report.BundleIntegrityHints)
+		}
+		joined := strings.Join(report.Lines, "\n")
+		for _, want := range []string{
+			"Bundle integrity: unverified",
+			"unreadable result.json",
+			"unreadable execution.json",
+			"Result:",
+			"Execution:",
+			"unavailable",
+			"files changed: 1",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("tail output missing %q:\n%s", want, joined)
+			}
+		}
+	})
 }
 
 func writeTailBundle(t *testing.T, runsDir, name, prompt string, result *agent.Result, patch string) {
