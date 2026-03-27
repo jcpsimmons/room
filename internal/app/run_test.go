@@ -307,6 +307,61 @@ func TestRunReclaimsAStaleRunLock(t *testing.T) {
 	}
 }
 
+func TestRunReclaimsAMalformedRunLock(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	lockPath := runLockPath(paths.RoomDir)
+	if err := os.WriteFile(lockPath, []byte("{not-json"), 0o644); err != nil {
+		t.Fatalf("write malformed lock: %v", err)
+	}
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Recovered from a malformed lock",
+				NextInstruction: "Keep going",
+				Status:          "continue",
+				CommitMessage:   "recover from malformed lock",
+			},
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/file b/file"},
+		statsSeq:     []git.DiffStats{{Files: 1, Added: 2, Deleted: 1}},
+		commitHashes: []string{"abc123"},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+		ProcessAlive: func(int) (bool, error) {
+			return false, nil
+		},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	if !strings.Contains(strings.Join(report.Lines, "\n"), "unreadable run lock") {
+		t.Fatalf("run lines missing malformed-lock hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+	if _, err := os.Stat(lockPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected malformed lock to be replaced and cleaned up, stat err=%v", err)
+	}
+}
+
 func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, paths := prepareInitializedRepo(t, repoRoot)

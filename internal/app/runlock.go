@@ -28,9 +28,36 @@ func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() err
 		return nil, "", nil, err
 	}
 
-	existing, err := readRunLock(path)
+	existing, lockHint, err := readRunLock(path)
 	if err != nil {
 		return nil, "", nil, err
+	}
+	if lockHint != "" {
+		// A malformed lock file should not block a fresh run from reclaiming the slot.
+		if err := writeRunLock(path, runLock{
+			PID:         os.Getpid(),
+			StartedAt:   s.now().UTC(),
+			RepoRoot:    repoRoot,
+			Provider:    provider,
+			RoomVersion: s.version.Version,
+		}); err != nil {
+			return nil, "", nil, err
+		}
+		lockNote := lockHint
+		release := func() error {
+			current, _, err := readRunLock(path)
+			if err != nil {
+				return nil
+			}
+			if current.PID != os.Getpid() {
+				return nil
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}
+		return release, lockNote, nil, nil
 	}
 	if existing.PID > 0 {
 		alive, err := s.processAlive(existing.PID)
@@ -64,7 +91,7 @@ func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() err
 	}
 
 	release := func() error {
-		current, err := readRunLock(path)
+		current, _, err := readRunLock(path)
 		if err != nil {
 			return nil
 		}
@@ -80,19 +107,19 @@ func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() err
 	return release, lockNote, recovery, nil
 }
 
-func readRunLock(path string) (runLock, error) {
+func readRunLock(path string) (runLock, string, error) {
 	data, err := fsutil.ReadFileIfExists(path)
 	if err != nil {
-		return runLock{}, err
+		return runLock{}, "", err
 	}
 	if len(data) == 0 {
-		return runLock{}, nil
+		return runLock{}, "", nil
 	}
 	var lock runLock
 	if err := json.Unmarshal(data, &lock); err != nil {
-		return runLock{}, err
+		return runLock{}, fmt.Sprintf("Hint: unreadable run lock at %s; ROOM will replace it on the next `room run`.", path), nil
 	}
-	return lock, nil
+	return lock, "", nil
 }
 
 func writeRunLock(path string, lock runLock) error {
@@ -106,9 +133,12 @@ func writeRunLock(path string, lock runLock) error {
 
 func runLockHint(roomDir string, alive func(int) (bool, error)) (string, error) {
 	path := runLockPath(roomDir)
-	lock, err := readRunLock(path)
+	lock, hint, err := readRunLock(path)
 	if err != nil {
 		return "", err
+	}
+	if hint != "" {
+		return hint, nil
 	}
 	if lock.PID == 0 {
 		return "", nil

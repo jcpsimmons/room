@@ -156,3 +156,29 @@ func TestStatusSurfacesStaleLockRecoveryState(t *testing.T) {
 		t.Fatalf("status lines missing recovery state:\n%s", joined)
 	}
 }
+
+func TestStatusSurfacesMalformedRunLockHint(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(runLockPath(paths.RoomDir), []byte("{not-json"), 0o644); err != nil {
+		t.Fatalf("write malformed run lock: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if !strings.Contains(report.LatestLockHint, "unreadable run lock") {
+		t.Fatalf("latest lock hint = %q", report.LatestLockHint)
+	}
+	if !strings.Contains(strings.Join(report.Lines, "\n"), "unreadable run lock") {
+		t.Fatalf("status lines missing unreadable lock hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}
