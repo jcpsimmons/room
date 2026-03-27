@@ -27,6 +27,7 @@ type TailReport struct {
 	BundleIntegrity      string                `json:"bundle_integrity,omitempty"`
 	BundleRecovery       string                `json:"bundle_recovery,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint `json:"bundle_integrity_hints,omitempty"`
+	Execution            *ExecutionReport      `json:"execution,omitempty"`
 	Prompt               string                `json:"prompt"`
 	Result               *agent.Result         `json:"result,omitempty"`
 	Diff                 git.DiffStats         `json:"diff"`
@@ -62,6 +63,10 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if err != nil {
 		return TailReport{}, err
 	}
+	execution, hasExecution, err := readExecutionArtifact(filepath.Join(runDir, "execution.json"))
+	if err != nil {
+		return TailReport{}, err
+	}
 	stats, hasStats, err := readTailDiffStats(filepath.Join(runDir, "diff.patch"))
 	if err != nil {
 		return TailReport{}, err
@@ -81,6 +86,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if assessment.Recovery != "" {
 		lines = append(lines, fmt.Sprintf("Stale-lock recovery: %s", assessment.Recovery))
 	}
+	lines = append(lines, executionLines(execution, hasExecution)...)
 	lines = append(lines,
 		"Prompt:",
 	)
@@ -120,6 +126,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		BundleIntegrity:      assessment.Integrity,
 		BundleRecovery:       assessment.Recovery,
 		BundleIntegrityHints: assessment.Hints,
+		Execution:            executionReportIfPresent(execution, hasExecution),
 		Prompt:               strings.TrimSpace(string(promptBody)),
 		Result:               resultIfPresent(result, hasResult),
 		Diff:                 statsIfPresent(stats, hasStats),

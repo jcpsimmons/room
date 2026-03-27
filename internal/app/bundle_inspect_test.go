@@ -31,9 +31,7 @@ diff --git a/a.txt b/a.txt
 +old
 +new
 `))
-	if err := os.WriteFile(filepath.Join(runDir, "execution.json"), []byte("{\"ok\":true}\n"), 0o644); err != nil {
-		t.Fatalf("write execution artifact: %v", err)
-	}
+	writeExecutionArtifactForTest(t, runDir, 2500, false, "")
 	if err := os.WriteFile(filepath.Join(runDir, "stdout.log"), []byte("stdout\n"), 0o644); err != nil {
 		t.Fatalf("write stdout: %v", err)
 	}
@@ -73,6 +71,12 @@ diff --git a/a.txt b/a.txt
 	if report.BundleIntegrity != bundleIntegrityOK {
 		t.Fatalf("bundle integrity = %q", report.BundleIntegrity)
 	}
+	if report.Execution == nil {
+		t.Fatal("expected execution details")
+	}
+	if report.Execution.DurationMS != 2500 || report.Execution.TimedOut || report.Execution.Error != "" {
+		t.Fatalf("execution report = %#v", report.Execution)
+	}
 	if len(report.Artifacts) != 6 {
 		t.Fatalf("artifact count = %d", len(report.Artifacts))
 	}
@@ -82,6 +86,8 @@ diff --git a/a.txt b/a.txt
 		"ROOM bundle",
 		"Bundle dir: " + runDir,
 		"Bundle integrity: verified",
+		"duration: 2.5s (2500 ms)",
+		"timed out: false",
 		"Manifest artifacts:",
 		"prompt.txt",
 		"result.json",

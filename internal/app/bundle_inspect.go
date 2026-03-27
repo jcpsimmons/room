@@ -27,6 +27,7 @@ type BundleReport struct {
 	BundleMode      string                 `json:"bundle_mode,omitempty"`
 	BundleIntegrity string                 `json:"bundle_integrity,omitempty"`
 	BundleHint      string                 `json:"bundle_hint,omitempty"`
+	Execution       *ExecutionReport       `json:"execution,omitempty"`
 	ManifestOK      bool                   `json:"manifest_ok"`
 	Artifacts       []BundleArtifactReport `json:"artifacts,omitempty"`
 	Lines           []string               `json:"lines"`
@@ -73,6 +74,10 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	if err != nil {
 		return BundleReport{}, err
 	}
+	execution, hasExecution, err := readExecutionArtifact(filepath.Join(runDir, "execution.json"))
+	if err != nil {
+		return BundleReport{}, err
+	}
 
 	report := BundleReport{
 		RepoRoot:        repoRoot,
@@ -81,6 +86,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 		BundleMode:      string(assessment.Mode),
 		BundleIntegrity: assessment.Integrity,
 		BundleHint:      assessment.Hint,
+		Execution:       executionReportIfPresent(execution, hasExecution),
 		ManifestOK:      manifestOK && assessment.ManifestOK,
 	}
 
@@ -109,6 +115,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	if report.BundleHint != "" {
 		lines = append(lines, report.BundleHint)
 	}
+	lines = append(lines, executionLines(execution, hasExecution)...)
 	if manifestOK {
 		lines = append(lines, "Manifest artifacts:")
 		for _, artifact := range report.Artifacts {

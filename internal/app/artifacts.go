@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,6 +19,12 @@ type executionArtifact struct {
 	TimedOut   bool          `json:"timed_out"`
 	Error      string        `json:"error,omitempty"`
 	Result     *agent.Result `json:"result,omitempty"`
+}
+
+type ExecutionReport struct {
+	DurationMS int64  `json:"duration_ms"`
+	TimedOut   bool   `json:"timed_out"`
+	Error      string `json:"error,omitempty"`
 }
 
 func writeExecutionArtifact(path, provider string, execution agent.Execution, startedAt, finishedAt time.Time, runErr error) error {
@@ -42,4 +49,55 @@ func writeExecutionArtifact(path, provider string, execution agent.Execution, st
 	}
 	data = append(data, '\n')
 	return fsutil.AtomicWriteFile(path, data, 0o644)
+}
+
+func readExecutionArtifact(path string) (*executionArtifact, bool, error) {
+	data, err := fsutil.ReadFileIfExists(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(data) == 0 {
+		return nil, false, nil
+	}
+
+	var artifact executionArtifact
+	if err := json.Unmarshal(data, &artifact); err != nil {
+		return nil, false, err
+	}
+	if strings.TrimSpace(artifact.Provider) == "" {
+		return nil, false, fmt.Errorf("malformed execution artifact: missing provider")
+	}
+	if artifact.StartedAt.IsZero() || artifact.FinishedAt.IsZero() {
+		return nil, false, fmt.Errorf("malformed execution artifact: missing timestamps")
+	}
+	return &artifact, true, nil
+}
+
+func executionReportIfPresent(artifact *executionArtifact, ok bool) *ExecutionReport {
+	if !ok || artifact == nil {
+		return nil
+	}
+	return &ExecutionReport{
+		DurationMS: artifact.DurationMS,
+		TimedOut:   artifact.TimedOut,
+		Error:      strings.TrimSpace(artifact.Error),
+	}
+}
+
+func executionLines(artifact *executionArtifact, ok bool) []string {
+	if !ok || artifact == nil {
+		return []string{"Execution:", indent("unavailable")}
+	}
+
+	lines := []string{"Execution:"}
+	lines = append(lines,
+		indent(fmt.Sprintf("duration: %s (%d ms)", time.Duration(artifact.DurationMS)*time.Millisecond, artifact.DurationMS)),
+		indent(fmt.Sprintf("timed out: %t", artifact.TimedOut)),
+	)
+	if strings.TrimSpace(artifact.Error) != "" {
+		lines = append(lines, indent(fmt.Sprintf("error: %s", strings.TrimSpace(artifact.Error))))
+	} else {
+		lines = append(lines, indent("error: none"))
+	}
+	return lines
 }
