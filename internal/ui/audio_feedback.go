@@ -6,6 +6,14 @@ import (
 	"github.com/jcpsimmons/room/internal/audio"
 )
 
+const (
+	outcomeAmpBoostCap    = 0.22 // max additive cue strength, independent of ambient level
+	outcomeFreqBlendCap   = 0.35 // clamp how much the cue can pull frequency
+	outcomeModFreqBlendCap = 0.35
+	outcomeModDepthBlendCap = 0.45
+	outcomeDetuneBlendCap = 0.55
+)
+
 // audioCue carries a short-lived tone that rides on top of the ambient voices.
 // It lets outcome events punch through with a distinct timbre before fading
 // back into the flux bed.
@@ -39,10 +47,42 @@ func (c audioCue) audioParams(fallback audio.Params) audio.Params {
 	}
 
 	out := c.recipe
-	out.Amp = fallback.Amp + out.Amp*c.energy
-	out.ModDepth *= 0.6 + 0.4*c.energy
-	out.Detune += (1 - c.energy) * 0.25
-	return out
+	blend := clamp01(c.energy)
+	outBlend := blend * 0.72 // taper aggressive spike tails
+
+	// Keep the cue as an articulate micro-spike, not a full voice takeover.
+	boost := math.Min(out.Amp*outBlend, outcomeAmpBoostCap)
+	outParam := clamp01(fallback.Amp + boost*(1-fallback.Amp))
+
+	return audio.Params{
+		Freq: fallbackBlend(fallback.Freq, out.Freq, outBlend, outcomeFreqBlendCap),
+		Amp:  outParam,
+		ModFreq: fallbackBlend(fallback.ModFreq, out.ModFreq, outBlend, outcomeModFreqBlendCap),
+		ModDepth: clampPositive(fallbackBlend(fallback.ModDepth, out.ModDepth, outBlend, outcomeModDepthBlendCap)),
+		Detune: fallbackBlend(fallback.Detune, out.Detune, outBlend, outcomeDetuneBlendCap),
+	}
+}
+
+func fallbackBlend(base, cue float64, blend, cap float64) float64 {
+	blend = clamp01(blend * cap)
+	return base + (cue-base)*blend
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func clampPositive(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 func outcomeToneRecipe(ev ProgressEvent) (audio.Params, bool) {
