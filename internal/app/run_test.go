@@ -75,6 +75,9 @@ type fakeGit struct {
 	commitMessages []string
 	recentCommits  []git.Commit
 	roomCommits    []git.Commit
+	diffCalls      int
+	statsCalls     int
+	bundleCalls    int
 }
 
 func (f *fakeGit) IsRepo(context.Context, string) (bool, error) { return true, nil }
@@ -91,6 +94,7 @@ func (f *fakeGit) IsDirty(context.Context, string) (bool, error) {
 	return value, nil
 }
 func (f *fakeGit) Diff(context.Context, string) (string, error) {
+	f.diffCalls++
 	if len(f.diffSeq) == 0 {
 		return "", nil
 	}
@@ -99,12 +103,27 @@ func (f *fakeGit) Diff(context.Context, string) (string, error) {
 	return value, nil
 }
 func (f *fakeGit) DiffStats(context.Context, string) (git.DiffStats, error) {
+	f.statsCalls++
 	if len(f.statsSeq) == 0 {
 		return git.DiffStats{}, nil
 	}
 	value := f.statsSeq[0]
 	f.statsSeq = f.statsSeq[1:]
 	return value, nil
+}
+func (f *fakeGit) DiffAndStats(context.Context, string) (string, git.DiffStats, error) {
+	f.bundleCalls++
+	diff := ""
+	if len(f.diffSeq) > 0 {
+		diff = f.diffSeq[0]
+		f.diffSeq = f.diffSeq[1:]
+	}
+	stats := git.DiffStats{}
+	if len(f.statsSeq) > 0 {
+		stats = f.statsSeq[0]
+		f.statsSeq = f.statsSeq[1:]
+	}
+	return diff, stats, nil
 }
 func (f *fakeGit) CommitAll(_ context.Context, _ string, message string) (string, error) {
 	f.commitMessages = append(f.commitMessages, message)
@@ -122,6 +141,55 @@ func (f *fakeGit) RecentCommitsWithPrefix(context.Context, string, int, string) 
 	return f.roomCommits, nil
 }
 func (f *fakeGit) Head(context.Context, string) (string, error) { return "deadbeef", nil }
+
+func TestRunUsesCombinedDiffAndStats(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Added a tighter filter",
+				NextInstruction: "Refine the filter graph",
+				Status:          "continue",
+				CommitMessage:   "tighten the filter",
+			},
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/file b/file"},
+		statsSeq:     []git.DiffStats{{Files: 1, Added: 3, Deleted: 1}},
+		commitHashes: []string{"abc123"},
+	}
+
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	if fakeGit.bundleCalls != 1 {
+		t.Fatalf("expected combined diff/stat call, got %d", fakeGit.bundleCalls)
+	}
+	if fakeGit.diffCalls != 0 || fakeGit.statsCalls != 0 {
+		t.Fatalf("expected legacy diff calls to stay unused, got diff=%d stats=%d", fakeGit.diffCalls, fakeGit.statsCalls)
+	}
+}
 
 func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	repoRoot := t.TempDir()

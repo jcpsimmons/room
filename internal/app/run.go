@@ -398,15 +398,26 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			continue
 		}
 
-		diff, err := s.git.Diff(ctx, repoRoot)
-		if err != nil {
-			return RunReport{}, err
+		diff := ""
+		stats := git.DiffStats{}
+		if bundle, ok := s.git.(interface {
+			DiffAndStats(context.Context, string) (string, git.DiffStats, error)
+		}); ok {
+			diff, stats, err = bundle.DiffAndStats(ctx, repoRoot)
+			if err != nil {
+				return RunReport{}, err
+			}
+		} else {
+			diff, err = s.git.Diff(ctx, repoRoot)
+			if err != nil {
+				return RunReport{}, err
+			}
+			stats, err = s.git.DiffStats(ctx, repoRoot)
+			if err != nil {
+				return RunReport{}, err
+			}
 		}
 		if err := fsutil.AtomicWriteFile(filepath.Join(runDir, "diff.patch"), []byte(diff), 0o644); err != nil {
-			return RunReport{}, err
-		}
-		stats, err := s.git.DiffStats(ctx, repoRoot)
-		if err != nil {
 			return RunReport{}, err
 		}
 

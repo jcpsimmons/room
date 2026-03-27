@@ -98,6 +98,25 @@ func (CLI) Diff(ctx context.Context, dir string) (string, error) {
 	return run(ctx, dir, append([]string{"diff", "--binary", "--"}, paths...)...)
 }
 
+func (CLI) DiffAndStats(ctx context.Context, dir string) (string, DiffStats, error) {
+	paths, err := changedPaths(ctx, dir, true)
+	if err != nil {
+		return "", DiffStats{}, err
+	}
+	if len(paths) == 0 {
+		return "", DiffStats{}, nil
+	}
+	diff, err := run(ctx, dir, append([]string{"diff", "--binary", "--"}, paths...)...)
+	if err != nil {
+		return "", DiffStats{}, err
+	}
+	out, err := run(ctx, dir, append([]string{"diff", "--numstat", "--"}, paths...)...)
+	if err != nil {
+		return "", DiffStats{}, err
+	}
+	return diff, parseDiffStats(out), nil
+}
+
 func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
 	paths, err := changedPaths(ctx, dir, true)
 	if err != nil {
@@ -110,22 +129,7 @@ func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
 	if err != nil {
 		return DiffStats{}, err
 	}
-	var stats DiffStats
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		added, _ := strconv.Atoi(fields[0])
-		deleted, _ := strconv.Atoi(fields[1])
-		stats.Files++
-		stats.Added += added
-		stats.Deleted += deleted
-	}
-	return stats, nil
+	return parseDiffStats(out), nil
 }
 
 func (CLI) CommitAll(ctx context.Context, dir, message string) (string, error) {
@@ -212,6 +216,25 @@ func parseCommits(raw string) []Commit {
 		commits = append(commits, Commit{Hash: strings.TrimSpace(parts[0]), Subject: strings.TrimSpace(parts[1])})
 	}
 	return commits
+}
+
+func parseDiffStats(raw string) DiffStats {
+	var stats DiffStats
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		added, _ := strconv.Atoi(fields[0])
+		deleted, _ := strconv.Atoi(fields[1])
+		stats.Files++
+		stats.Added += added
+		stats.Deleted += deleted
+	}
+	return stats
 }
 
 type statusEntry struct {
