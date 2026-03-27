@@ -240,6 +240,40 @@ func TestDoctorJSONEncoding(t *testing.T) {
 	}
 }
 
+func TestStatusJSONEncoding(t *testing.T) {
+	var buf bytes.Buffer
+	report := app.StatusReport{
+		RepoRoot: "/tmp/repo",
+		Lines:    []string{"ROOM status"},
+	}
+
+	if err := writeStatusJSON(&buf, report, nil); err != nil {
+		t.Fatalf("writeStatusJSON: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload["schema_version"] != float64(doctorJSONSchemaVersion) {
+		t.Fatalf("schema_version = %v", payload["schema_version"])
+	}
+	if payload["type"] != "result" {
+		t.Fatalf("type = %v", payload["type"])
+	}
+	if got, ok := payload["ok"].(bool); !ok || !got {
+		t.Fatalf("expected ok result, got %v", payload["ok"])
+	}
+
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result = %#v", payload["result"])
+	}
+	if result["repo_root"] != report.RepoRoot {
+		t.Fatalf("repo_root = %v", result["repo_root"])
+	}
+}
+
 func fixedTime() time.Time {
 	return time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 }

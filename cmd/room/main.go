@@ -142,7 +142,7 @@ func newStatusCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				ConfigPath: configPath,
 			})
 			if asJSON {
-				return printJSON(report, err)
+				return writeStatusJSON(os.Stdout, report, err)
 			}
 			if err != nil {
 				return err
@@ -733,17 +733,25 @@ func renderDoctor(report app.DoctorReport) error {
 
 const doctorJSONSchemaVersion = 1
 
-type doctorJSONResultLine struct {
+type versionedJSONResultLine[T any] struct {
 	SchemaVersion int              `json:"schema_version"`
 	Type          string           `json:"type"`
 	OK            bool             `json:"ok"`
-	Result        app.DoctorReport  `json:"result,omitempty"`
+	Result        T                `json:"result,omitempty"`
 	Error         string           `json:"error,omitempty"`
 }
 
 func writeDoctorJSON(w io.Writer, report app.DoctorReport, err error) error {
-	payload := doctorJSONResultLine{
-		SchemaVersion: doctorJSONSchemaVersion,
+	return writeVersionedJSONResult(w, doctorJSONSchemaVersion, report, err)
+}
+
+func writeStatusJSON(w io.Writer, report app.StatusReport, err error) error {
+	return writeVersionedJSONResult(w, doctorJSONSchemaVersion, report, err)
+}
+
+func writeVersionedJSONResult[T any](w io.Writer, schemaVersion int, report T, err error) error {
+	payload := versionedJSONResultLine[T]{
+		SchemaVersion: schemaVersion,
 		Type:          "result",
 		OK:            err == nil,
 		Result:        report,
