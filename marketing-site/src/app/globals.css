@@ -145,6 +145,7 @@ a {
 }
 
 .hero-grid,
+.contract-grid,
 .instrument-grid,
 .install-grid,
 .broadcast-grid {
@@ -154,6 +155,11 @@ a {
 
 .hero-grid {
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+}
+
+.contract-grid {
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 1rem;
 }
 
 .instrument-grid,
@@ -753,6 +759,7 @@ a {
 }
 
 .panel--sequence,
+.panel--contract,
 .panel--install,
 .panel--broadcast,
 .panel--artifact {
@@ -782,6 +789,62 @@ a {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.9rem;
   margin-top: 1.25rem;
+}
+
+.contract-panel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.3rem;
+}
+
+.contract-node {
+  position: relative;
+  min-height: 12rem;
+  padding: 1rem;
+  border-radius: 1.3rem;
+  border: 2px solid rgba(9, 17, 24, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.34)),
+    rgba(255, 255, 255, 0.26);
+}
+
+.contract-node::before {
+  content: "";
+  position: absolute;
+  inset: 0.9rem 0.9rem auto auto;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: var(--coral);
+  box-shadow: 0 0 0 6px rgba(255, 107, 61, 0.16);
+}
+
+.contract-node__index {
+  display: inline-flex;
+  margin-bottom: 0.75rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--panel-strong);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.contract-node h3 {
+  margin: 0;
+  font-family: var(--font-headline), sans-serif;
+  font-size: 1.25rem;
+  line-height: 0.98;
+  text-transform: uppercase;
+}
+
+.contract-node p {
+  margin: 0.8rem 0 0;
+  line-height: 1.55;
+  color: rgba(9, 17, 24, 0.8);
 }
 
 .sequence-step {
@@ -1151,6 +1214,7 @@ a {
   }
 
   .hero-grid,
+  .contract-grid,
   .instrument-grid,
   .install-grid,
   .broadcast-grid,
@@ -1194,6 +1258,7 @@ a {
   }
 
   .scope-readout,
+  .contract-panel,
   .sequence-grid {
     grid-template-columns: 1fr;
   }

@@ -4,6 +4,7 @@ const newsletterSignupUrl = "https://drjoshcsimmons.kit.com/";
 
 const navItems = [
   { href: "#signal", label: "Signal Path" },
+  { href: "#contract", label: "Signal Contract" },
   { href: "#control-surface", label: "Control Surface" },
   { href: "#install", label: "Install" },
   { href: "#broadcast", label: "Broadcast" },
@@ -117,6 +118,29 @@ const meterLevels = [
   { id: "retry-voltage", level: 57 },
   { id: "resonance", level: 74 },
   { id: "pivot-pressure", level: 48 },
+] as const;
+
+const signalContract = [
+  {
+    label: "Inputs",
+    value: "Local git repo, authenticated CLI, seeded instruction.",
+  },
+  {
+    label: "Behavior",
+    value: "One improvement per pass, cold-start context, validated JSON.",
+  },
+  {
+    label: "Memory",
+    value: "No chat bleed. Summaries, commits, and state stay on disk.",
+  },
+  {
+    label: "Outputs",
+    value: "Prompt, stdout, stderr, result, diff, and commit choice.",
+  },
+  {
+    label: "Escape hatch",
+    value: "When the loop stalls, ROOM rewrites the next instruction into a pivot.",
+  },
 ] as const;
 
 const tickerItems = [
@@ -276,6 +300,26 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="contract-grid" id="contract">
+        <article className="panel panel--contract">
+          <div className="section-heading">
+            <p className="eyebrow">Signal contract</p>
+            <h2>ROOM stays local, keeps the tape, and refuses to hallucinate momentum.</h2>
+          </div>
+          <div className="contract-panel">
+            {signalContract.map((item, index) => (
+              <article key={item.label} className="contract-node">
+                <span className="contract-node__index">
+                  0{index + 1}
+                </span>
+                <h3>{item.label}</h3>
+                <p>{item.value}</p>
+              </article>
+            ))}
+          </div>
+        </article>
       </section>
 
       <div className="ticker">

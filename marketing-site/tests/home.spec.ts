@@ -26,6 +26,14 @@ test("renders the ROOM marketing page", async ({ page }) => {
     page.locator("#signal").getByText("forced pivots", { exact: true }),
   ).toBeVisible();
 
+  await expect(page.locator("#contract")).toContainText(
+    "ROOM stays local, keeps the tape, and refuses to hallucinate momentum.",
+  );
+  await expect(page.locator("#contract")).toContainText("Inputs");
+  await expect(page.locator("#contract")).toContainText(
+    "Prompt, stdout, stderr, result, diff, and commit choice.",
+  );
+
   await expect(page.getByTestId("embed-iframe")).toHaveAttribute(
     "src",
     "https://open.spotify.com/embed/album/1dedNPacu6iCzgAblljBCr?utm_source=generator",

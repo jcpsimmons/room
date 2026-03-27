@@ -34,6 +34,7 @@ func Build(input BuildInput) string {
 	b.WriteString("- Tests are for listening, not for coverage theater. Only write them when you need to observe behavior.\n")
 	b.WriteString("- Prioritize novelty and creative ambition over production-readiness. Nobody is shipping this to millions of DAUs. Make it weird, make it sing.\n")
 	b.WriteString("- Do not ask questions. Patch and play.\n")
+	b.WriteString("- Do not run git add, git commit, or any git staging commands. The sequencer handles commits automatically after each iteration.\n")
 	b.WriteString("- Return only JSON that matches the supplied schema.\n\n")
 	b.WriteString("Gate semantics:\n")
 	b.WriteString("- status=continue: the signal path is hot, keep the sequence running.\n")
