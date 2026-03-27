@@ -95,6 +95,78 @@ diff --git a/a.txt b/a.txt
 	}
 }
 
+func TestStatusSurfacesUnreadableNewestBundleArtifacts(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	runDir := filepath.Join(paths.RunsDir, "0001")
+	writeTailBundle(t, paths.RunsDir, "0001", "damaged prompt", &agent.Result{
+		Summary:         "Signal smeared",
+		NextInstruction: "Trace the fault",
+		Status:          "continue",
+		CommitMessage:   "follow the crackle",
+	}, strings.TrimSpace(`
+diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1,2 @@
+-old
++old
++new
+`))
+	writeExecutionArtifactForTest(t, runDir, 900, false, "")
+	for _, name := range []string{"stdout.log", "stderr.log"} {
+		if err := os.WriteFile(filepath.Join(runDir, name), nil, 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
+		"prompt.txt",
+		"execution.json",
+		"stdout.log",
+		"stderr.log",
+		"result.json",
+		"diff.patch",
+	}); err != nil {
+		t.Fatalf("write bundle manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "result.json"), []byte("{"), 0o644); err != nil {
+		t.Fatalf("corrupt result artifact: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "execution.json"), []byte(`{"provider":""}`+"\n"), 0o644); err != nil {
+		t.Fatalf("corrupt execution artifact: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.LatestBundleIntegrity != bundleIntegrityBad {
+		t.Fatalf("latest bundle integrity = %q", report.LatestBundleIntegrity)
+	}
+	for _, want := range []string{"unreadable result.json", "unreadable execution.json"} {
+		if !strings.Contains(report.LatestBundleHint, want) {
+			t.Fatalf("latest bundle hint missing %q: %s", want, report.LatestBundleHint)
+		}
+	}
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"unreadable result.json",
+		"unreadable execution.json",
+		"artifact_decode_failed",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("status lines missing %q:\n%s", want, joined)
+		}
+	}
+}
+
 func TestStatusSurvivesMissingInstructionFile(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

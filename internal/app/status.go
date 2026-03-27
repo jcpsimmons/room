@@ -79,6 +79,9 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if err != nil {
 		return StatusReport{}, err
 	}
+	if err := appendNewestBundleArtifactWarnings(&assessment); err != nil {
+		return StatusReport{}, err
+	}
 	latestRunDir := assessment.RunDir
 	lockHint, err := runLockHint(paths.RoomDir, s.processAlive)
 	if err != nil {
@@ -185,6 +188,26 @@ func formatTime(t time.Time) string {
 		return "never"
 	}
 	return t.Format(time.RFC3339)
+}
+
+func appendNewestBundleArtifactWarnings(assessment *bundleAssessment) error {
+	if assessment == nil || strings.TrimSpace(assessment.RunDir) == "" {
+		return nil
+	}
+
+	if _, _, resultWarn, err := readTailResultLenient(filepath.Join(assessment.RunDir, "result.json")); err != nil {
+		return err
+	} else if resultWarn != nil {
+		appendArtifactDecodeWarning(assessment, "newest bundle", "result.json", resultWarn)
+	}
+
+	if _, _, executionWarn, err := readExecutionArtifactLenient(filepath.Join(assessment.RunDir, "execution.json")); err != nil {
+		return err
+	} else if executionWarn != nil {
+		appendArtifactDecodeWarning(assessment, "newest bundle", "execution.json", executionWarn)
+	}
+
+	return nil
 }
 
 func newestBundleHint(runsDir string) (string, string, error) {
