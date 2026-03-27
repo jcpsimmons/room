@@ -198,6 +198,48 @@ func TestRunJSONStreamEncoding(t *testing.T) {
 	}
 }
 
+func TestDoctorJSONEncoding(t *testing.T) {
+	var buf bytes.Buffer
+	report := app.DoctorReport{
+		RepoRoot: "/tmp/repo",
+		Checks: []app.DoctorCheck{
+			{Name: "git", OK: true, Message: "git is available"},
+			{Name: "state", OK: false, Message: "missing state.json"},
+		},
+		Lines: []string{"ROOM doctor"},
+	}
+
+	if err := writeDoctorJSON(&buf, report, nil); err != nil {
+		t.Fatalf("writeDoctorJSON: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload["schema_version"] != float64(doctorJSONSchemaVersion) {
+		t.Fatalf("schema_version = %v", payload["schema_version"])
+	}
+	if payload["type"] != "result" {
+		t.Fatalf("type = %v", payload["type"])
+	}
+	if got, ok := payload["ok"].(bool); !ok || !got {
+		t.Fatalf("expected ok result, got %v", payload["ok"])
+	}
+
+	result, ok := payload["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("result = %#v", payload["result"])
+	}
+	if result["repo_root"] != report.RepoRoot {
+		t.Fatalf("repo_root = %v", result["repo_root"])
+	}
+	checks, ok := result["checks"].([]any)
+	if !ok || len(checks) != len(report.Checks) {
+		t.Fatalf("checks = %#v", result["checks"])
+	}
+}
+
 func fixedTime() time.Time {
 	return time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 }

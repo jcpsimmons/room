@@ -167,7 +167,7 @@ func newDoctorCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				ConfigPath: configPath,
 			})
 			if asJSON {
-				return printJSON(report, err)
+				return writeDoctorJSON(os.Stdout, report, err)
 			}
 			if err != nil {
 				return err
@@ -729,6 +729,32 @@ func renderDoctor(report app.DoctorReport) error {
 		Checks:   checks,
 		Notes:    notes,
 	}))
+}
+
+const doctorJSONSchemaVersion = 1
+
+type doctorJSONResultLine struct {
+	SchemaVersion int              `json:"schema_version"`
+	Type          string           `json:"type"`
+	OK            bool             `json:"ok"`
+	Result        app.DoctorReport  `json:"result,omitempty"`
+	Error         string           `json:"error,omitempty"`
+}
+
+func writeDoctorJSON(w io.Writer, report app.DoctorReport, err error) error {
+	payload := doctorJSONResultLine{
+		SchemaVersion: doctorJSONSchemaVersion,
+		Type:          "result",
+		OK:            err == nil,
+		Result:        report,
+		Error:         errorText(err, ""),
+	}
+	data, marshalErr := json.MarshalIndent(payload, "", "  ")
+	if marshalErr != nil {
+		return errors.Join(err, marshalErr)
+	}
+	_, writeErr := fmt.Fprintln(w, string(data))
+	return errors.Join(err, writeErr)
 }
 
 func renderRun(report app.RunReport) error {

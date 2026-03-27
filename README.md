@@ -207,6 +207,8 @@ Checks:
 - write access
 - the expectation that provider installation and auth are external
 
+Use `room doctor --json` when you want the same checks as a machine-readable report instead of the text panel.
+
 ### `room version`
 
 Prints the release version, commit, and build date.
