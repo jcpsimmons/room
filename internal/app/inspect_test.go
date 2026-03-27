@@ -5,8 +5,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/git"
+	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/version"
 )
 
@@ -58,9 +61,27 @@ func TestInspectSurvivesMissingInstructionFile(t *testing.T) {
 		t.Fatalf("remove instruction: %v", err)
 	}
 	writeTailBundle(t, paths.RunsDir, "0001", "newest prompt", nil, "")
+	if err := logs.AppendSummary(paths.SummariesPath, logs.SummaryEntry{
+		Iteration: 1,
+		Timestamp: time.Date(2026, 3, 25, 12, 30, 0, 0, time.UTC),
+		Status:    "continue",
+		Summary:   "Kept the loop alive",
+	}); err != nil {
+		t.Fatalf("append summary: %v", err)
+	}
+	if err := logs.AppendSeenInstruction(paths.SeenInstructionsPath, "Hold the drift"); err != nil {
+		t.Fatalf("append seen instruction: %v", err)
+	}
 
 	svc := NewService(Dependencies{
-		Git:     gitClientForTailTest{},
+		Git: &fakeGit{
+			root:        repoRoot,
+			statusShort: " M a.txt",
+			recentCommits: []git.Commit{{
+				Hash:    "abc123",
+				Subject: "close the loop",
+			}},
+		},
 		Version: version.Info{Version: "dev"},
 	})
 
@@ -77,5 +98,26 @@ func TestInspectSurvivesMissingInstructionFile(t *testing.T) {
 		if !strings.Contains(report.Prompt, want) {
 			t.Fatalf("inspect prompt missing %q:\n%s", want, report.Prompt)
 		}
+	}
+	if report.RepoRoot != repoRoot {
+		t.Fatalf("repo root = %q", report.RepoRoot)
+	}
+	if report.CurrentInstruction != "" {
+		t.Fatalf("current instruction = %q", report.CurrentInstruction)
+	}
+	if !strings.Contains(report.RecoveryHint, "missing instruction.txt") {
+		t.Fatalf("recovery hint = %q", report.RecoveryHint)
+	}
+	if len(report.RecentSummaries) != 1 {
+		t.Fatalf("recent summaries = %#v", report.RecentSummaries)
+	}
+	if len(report.PriorInstructions) != 1 || report.PriorInstructions[0] != "Hold the drift" {
+		t.Fatalf("prior instructions = %#v", report.PriorInstructions)
+	}
+	if len(report.RecentCommits) != 1 || report.RecentCommits[0].Hash != "abc123" {
+		t.Fatalf("recent commits = %#v", report.RecentCommits)
+	}
+	if report.GitStatus != " M a.txt" {
+		t.Fatalf("git status = %q", report.GitStatus)
 	}
 }

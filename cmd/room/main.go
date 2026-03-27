@@ -183,6 +183,7 @@ func newDoctorCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	var configPath string
 	var instructionFile string
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "inspect",
 		Short: "Show the prompt ROOM would send to the selected agent",
@@ -192,6 +193,9 @@ func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				ConfigPath:      configPath,
 				InstructionFile: instructionFile,
 			})
+			if asJSON {
+				return printJSON(report, err)
+			}
 			if err != nil {
 				return err
 			}
@@ -201,6 +205,7 @@ func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
 	cmd.Flags().StringVar(&instructionFile, "instruction-file", "", "override the instruction file path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
 	return cmd
 }
 

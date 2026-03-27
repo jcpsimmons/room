@@ -6,6 +6,7 @@ import (
 
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
+	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/prompt"
 )
@@ -17,7 +18,14 @@ type InspectOptions struct {
 }
 
 type InspectReport struct {
-	Prompt string `json:"prompt"`
+	RepoRoot           string              `json:"repo_root"`
+	Prompt             string              `json:"prompt"`
+	CurrentInstruction string              `json:"current_instruction"`
+	RecoveryHint       string              `json:"recovery_hint,omitempty"`
+	RecentSummaries    []logs.SummaryEntry `json:"recent_summaries,omitempty"`
+	PriorInstructions  []string            `json:"prior_instructions,omitempty"`
+	RecentCommits      []git.Commit        `json:"recent_commits,omitempty"`
+	GitStatus          string              `json:"git_status,omitempty"`
 }
 
 func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectReport, error) {
@@ -67,16 +75,24 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 			recoveryHint = recoveryHint + "\n" + missingInstructionHint
 		}
 	}
+	promptText := prompt.Build(prompt.BuildInput{
+		CurrentInstruction: currentInstruction,
+		RecoveryHint:       recoveryHint,
+		RecentSummaries:    summaries,
+		PriorInstructions:  priorInstructions,
+		RecentCommits:      commits,
+		GitStatus:          gitStatus,
+		RepoPath:           repoRoot,
+	})
 
 	return InspectReport{
-		Prompt: prompt.Build(prompt.BuildInput{
-			CurrentInstruction: currentInstruction,
-			RecoveryHint:       recoveryHint,
-			RecentSummaries:    summaries,
-			PriorInstructions:  priorInstructions,
-			RecentCommits:      commits,
-			GitStatus:          gitStatus,
-			RepoPath:           repoRoot,
-		}),
+		RepoRoot:           repoRoot,
+		Prompt:             promptText,
+		CurrentInstruction: currentInstruction,
+		RecoveryHint:       recoveryHint,
+		RecentSummaries:    summaries,
+		PriorInstructions:  priorInstructions,
+		RecentCommits:      commits,
+		GitStatus:          gitStatus,
 	}, nil
 }
