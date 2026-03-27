@@ -1212,6 +1212,27 @@ func writeRepoFile(t *testing.T, path, content string) {
 	}
 }
 
+func writeLinkedWorktreeGitDir(t *testing.T, repoRoot string) string {
+	t.Helper()
+
+	adminRoot := t.TempDir()
+	commonDir := filepath.Join(adminRoot, "main.git")
+	gitDir := filepath.Join(commonDir, "worktrees", "room")
+	if err := os.MkdirAll(filepath.Join(commonDir, "info"), 0o755); err != nil {
+		t.Fatalf("mkdir common info: %v", err)
+	}
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir gitdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatalf("write commondir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write .git pointer: %v", err)
+	}
+	return filepath.Join(commonDir, "info", "exclude")
+}
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 

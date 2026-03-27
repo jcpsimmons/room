@@ -123,7 +123,35 @@ func TestInitPinsRoomStateIntoGitExclude(t *testing.T) {
 		t.Fatalf("expected clean git status after init, got %q", status)
 	}
 
-	if !containsLine(report.Lines, "Added `.room/` to `.git/info/exclude` so plain `git status` stays quiet.") {
+	if !containsLine(report.Lines, "Added `.room/` to the git exclude file so plain `git status` stays quiet.") {
+		t.Fatalf("expected exclude note in report lines: %#v", report.Lines)
+	}
+}
+
+func TestInitPinsRoomStateIntoWorktreeExclude(t *testing.T) {
+	repoRoot := t.TempDir()
+	excludePath := writeLinkedWorktreeGitDir(t, repoRoot)
+
+	svc := NewService(Dependencies{
+		Git:     &fakeGit{root: repoRoot},
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Init(context.Background(), InitOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	excludeData, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read exclude: %v", err)
+	}
+	if !strings.Contains(string(excludeData), ".room/") {
+		t.Fatalf("exclude file missing .room/: %q", string(excludeData))
+	}
+
+	if !containsLine(report.Lines, "Added `.room/` to the git exclude file so plain `git status` stays quiet.") {
 		t.Fatalf("expected exclude note in report lines: %#v", report.Lines)
 	}
 }

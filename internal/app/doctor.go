@@ -100,9 +100,9 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	if ignoreOK, err := gitInfoExcludeProtectsRoom(repoRoot); err != nil {
 		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: err.Error()})
 	} else if ignoreOK {
-		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: true, Message: ".git/info/exclude already protects .room/"})
+		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: true, Message: "git exclude file already protects .room/"})
 	} else {
-		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: ".git/info/exclude does not mention .room/; run `room init` or add it manually to keep plain `git status` clean"})
+		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: "git exclude file does not mention .room/; run `room init` or add it manually to keep plain `git status` clean"})
 	}
 	roomIgnorePath := filepath.Join(repoRoot, ".roomignore")
 	if fsutil.FileExists(roomIgnorePath) {
@@ -225,7 +225,11 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 }
 
 func gitInfoExcludeProtectsRoom(repoRoot string) (bool, error) {
-	data, err := os.ReadFile(filepath.Join(repoRoot, ".git", "info", "exclude"))
+	path, err := gitInfoExcludePath(repoRoot)
+	if err != nil {
+		return false, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil

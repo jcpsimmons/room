@@ -100,10 +100,10 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 	}
 	if missingIgnore(repoRoot) {
 		if wrote, err := ensureRoomIgnored(repoRoot); err == nil && wrote {
-			lines = append(lines, "Added `.room/` to `.git/info/exclude` so plain `git status` stays quiet.")
+			lines = append(lines, "Added `.room/` to the git exclude file so plain `git status` stays quiet.")
 		} else {
 			lines = append(lines, "ROOM ignores `.room/` in its own dirty checks, diffs, and commits.")
-			lines = append(lines, "Recommendation: add `.room/` to `.git/info/exclude` or `.gitignore` if you also want plain `git status` to stay clean.")
+			lines = append(lines, "Recommendation: add `.room/` to the git exclude file or `.gitignore` if you also want plain `git status` to stay clean.")
 		}
 	}
 
@@ -119,10 +119,11 @@ func missingIgnore(repoRoot string) bool {
 }
 
 func roomIgnoreConfigured(repoRoot string) bool {
-	for _, path := range []string{
-		filepath.Join(repoRoot, ".gitignore"),
-		filepath.Join(repoRoot, ".git", "info", "exclude"),
-	} {
+	paths := []string{filepath.Join(repoRoot, ".gitignore")}
+	if excludePath, err := gitInfoExcludePath(repoRoot); err == nil {
+		paths = append(paths, excludePath)
+	}
+	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
@@ -141,7 +142,10 @@ func ensureRoomIgnored(repoRoot string) (bool, error) {
 		return false, nil
 	}
 
-	excludePath := filepath.Join(repoRoot, ".git", "info", "exclude")
+	excludePath, err := gitInfoExcludePath(repoRoot)
+	if err != nil {
+		return false, err
+	}
 	data, err := os.ReadFile(excludePath)
 	if err != nil && !os.IsNotExist(err) {
 		return false, err
