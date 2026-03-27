@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -42,6 +43,36 @@ diff --git a/a.txt b/a.txt
 	for _, want := range []string{
 		"Artifact fault signal:",
 		"Hint: newest bundle 0002 is incomplete; missing result.json and diff.patch.",
+	} {
+		if !strings.Contains(report.Prompt, want) {
+			t.Fatalf("inspect prompt missing %q:\n%s", want, report.Prompt)
+		}
+	}
+}
+
+func TestInspectSurvivesMissingInstructionFile(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.Remove(paths.InstructionPath); err != nil {
+		t.Fatalf("remove instruction: %v", err)
+	}
+	writeTailBundle(t, paths.RunsDir, "0001", "newest prompt", nil, "")
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Inspect(context.Background(), InspectOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+
+	for _, want := range []string{
+		"Current instruction unavailable: missing instruction.txt.",
+		"Artifact fault signal:",
+		"Hint: newest bundle 0001 is incomplete; missing result.json and diff.patch.",
 	} {
 		if !strings.Contains(report.Prompt, want) {
 			t.Fatalf("inspect prompt missing %q:\n%s", want, report.Prompt)

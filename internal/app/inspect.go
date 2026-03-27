@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jcpsimmons/room/internal/config"
+	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/prompt"
 )
@@ -51,15 +53,25 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 	if err != nil {
 		return InspectReport{}, err
 	}
-	currentInstruction, err := readTrimmed(paths.InstructionPath)
+	instructionBody, err := fsutil.ReadFileIfExists(paths.InstructionPath)
 	if err != nil {
 		return InspectReport{}, err
+	}
+	currentInstruction := strings.TrimSpace(string(instructionBody))
+	recoveryHint := assessment.Hint
+	if !fsutil.FileExists(paths.InstructionPath) {
+		missingInstructionHint := "Current instruction unavailable: missing instruction.txt."
+		if strings.TrimSpace(recoveryHint) == "" {
+			recoveryHint = missingInstructionHint
+		} else {
+			recoveryHint = recoveryHint + "\n" + missingInstructionHint
+		}
 	}
 
 	return InspectReport{
 		Prompt: prompt.Build(prompt.BuildInput{
 			CurrentInstruction: currentInstruction,
-			RecoveryHint:       assessment.Hint,
+			RecoveryHint:       recoveryHint,
 			RecentSummaries:    summaries,
 			PriorInstructions:  priorInstructions,
 			RecentCommits:      commits,
