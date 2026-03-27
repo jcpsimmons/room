@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -166,5 +167,35 @@ unexpected_toggle = true
 
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected unknown key validation error")
+	}
+}
+
+func TestValidatePathsRejectsInstructionFileCollisions(t *testing.T) {
+	t.Parallel()
+
+	paths := ResolvePaths("/tmp/repo", "", Default())
+	paths.InstructionPath = paths.StatePath
+
+	err := ValidatePaths(paths)
+	if err == nil {
+		t.Fatal("expected path validation error")
+	}
+	if !strings.Contains(err.Error(), "collides with the ROOM state file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidatePathsRejectsRunsArchiveTargets(t *testing.T) {
+	t.Parallel()
+
+	paths := ResolvePaths("/tmp/repo", "", Default())
+	paths.InstructionPath = filepath.Join(paths.RunsDir, "seed.txt")
+
+	err := ValidatePaths(paths)
+	if err == nil {
+		t.Fatal("expected path validation error")
+	}
+	if !strings.Contains(err.Error(), "resolves inside the runs archive") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -269,6 +269,44 @@ func TestDoctorSurfacesMalformedRoomIgnore(t *testing.T) {
 	}
 }
 
+func TestDoctorSurfacesConfigPathCollisions(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	writeRepoFile(t, paths.ConfigPath, `
+[prompt]
+instruction_file = ".room/state.json"
+`)
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "config_paths" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected config_paths failure, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "collides with the ROOM state file") {
+			t.Fatalf("unexpected config_paths message: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected config_paths check, got %#v", report.Checks)
+	}
+}
+
 func TestDoctorSurfacesPromptHistoryStagnation(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

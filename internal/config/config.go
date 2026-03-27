@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -233,6 +234,58 @@ func (c Config) Validate() error {
 		return fmt.Errorf("unsupported claude permission_mode %q; ROOM currently requires %q", strings.TrimSpace(c.Claude.PermissionMode), "bypassPermissions")
 	}
 	return nil
+}
+
+func ValidatePaths(paths Paths) error {
+	var issues []string
+	instructionPath := filepath.Clean(paths.InstructionPath)
+	configPath := filepath.Clean(paths.ConfigPath)
+	runsDir := filepath.Clean(paths.RunsDir)
+
+	if isSubpath(instructionPath, runsDir) {
+		issues = append(issues, fmt.Sprintf("prompt.instruction_file resolves inside the runs archive: %s", instructionPath))
+	}
+	if isSubpath(configPath, runsDir) {
+		issues = append(issues, fmt.Sprintf("config file resolves inside the runs archive: %s", configPath))
+	}
+
+	for _, collision := range []struct {
+		label string
+		path  string
+	}{
+		{label: "config file", path: configPath},
+		{label: "state file", path: paths.StatePath},
+		{label: "schema file", path: paths.SchemaPath},
+		{label: "summaries log", path: paths.SummariesPath},
+		{label: "seen instructions log", path: paths.SeenInstructionsPath},
+	} {
+		if samePath(instructionPath, collision.path) {
+			issues = append(issues, fmt.Sprintf("prompt.instruction_file collides with the ROOM %s: %s", collision.label, instructionPath))
+		}
+	}
+
+	if len(issues) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(issues, "; "))
+}
+
+func samePath(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func isSubpath(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	if path == root {
+		return true
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	rel = filepath.Clean(rel)
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func resolve(base, path string) string {

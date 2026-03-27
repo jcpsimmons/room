@@ -52,6 +52,22 @@ func (s *Service) ConfigCheck(ctx context.Context, opts ConfigCheckOptions) (Con
 	}
 
 	paths := config.ResolvePaths(repoRoot, configPath, cfg)
+	if err := config.ValidatePaths(paths); err != nil {
+		return ConfigCheckReport{
+			RepoRoot:     repoRoot,
+			ConfigPath:   paths.ConfigPath,
+			ConfigExists: fsutil.FileExists(paths.ConfigPath),
+			Config:       cfg,
+			Paths:        paths,
+			Lines: []string{
+				"ROOM config check",
+				fmt.Sprintf("Repo: %s", repoRoot),
+				fmt.Sprintf("Config source: %s", paths.ConfigPath),
+				fmt.Sprintf("Config status: %s", configStatusLabel(paths.ConfigPath)),
+				fmt.Sprintf("Config wiring failed: %v", err),
+			},
+		}, err
+	}
 	lines := []string{
 		"ROOM config check",
 		fmt.Sprintf("Repo: %s", repoRoot),

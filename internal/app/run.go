@@ -611,6 +611,9 @@ func (s *Service) loadConfig(ctx context.Context, repoRoot, override string) (co
 		return config.Config{}, config.Paths{}, err
 	}
 	paths := config.ResolvePaths(repoRoot, path, cfg)
+	if err := config.ValidatePaths(paths); err != nil {
+		return config.Config{}, config.Paths{}, err
+	}
 	if !fsutil.FileExists(paths.SchemaPath) {
 		if err := agent.WriteSchema(paths.SchemaPath); err != nil {
 			return config.Config{}, config.Paths{}, err

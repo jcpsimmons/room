@@ -89,6 +89,11 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	checks = append(checks, DoctorCheck{Name: "jq", OK: true, Message: "jq is not required for ROOM v1"})
 
 	paths := config.ResolvePaths(repoRoot, configPath, cfg)
+	if err := config.ValidatePaths(paths); err != nil {
+		checks = append(checks, DoctorCheck{Name: "config_paths", OK: false, Message: fmt.Sprintf("config path wiring failed: %v", err)})
+	} else {
+		checks = append(checks, DoctorCheck{Name: "config_paths", OK: true, Message: "resolved ROOM paths do not collide"})
+	}
 	if ignoreOK, err := gitInfoExcludeProtectsRoom(repoRoot); err != nil {
 		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: err.Error()})
 	} else if ignoreOK {
