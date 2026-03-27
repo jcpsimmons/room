@@ -19,12 +19,14 @@ import (
 type bundleMode string
 
 const (
-	bundleModeDryRun    bundleMode = "dry_run"
-	bundleModeExecuted  bundleMode = "executed"
-	bundleModeLegacy    bundleMode = "legacy"
-	bundleIntegrityOK              = "verified"
-	bundleIntegrityWarn            = "unverified"
-	bundleIntegrityBad             = "mismatch"
+	bundleModeDryRun      bundleMode = "dry_run"
+	bundleModeExecuted    bundleMode = "executed"
+	bundleModeFailed      bundleMode = "failed"
+	bundleModeInterrupted bundleMode = "interrupted"
+	bundleModeLegacy      bundleMode = "legacy"
+	bundleIntegrityOK                = "verified"
+	bundleIntegrityWarn              = "unverified"
+	bundleIntegrityBad               = "mismatch"
 )
 
 var errMalformedBundleManifest = fmt.Errorf("malformed bundle manifest")
@@ -165,7 +167,7 @@ func (manifest bundleManifest) validate() []BundleIntegrityHint {
 	}
 
 	switch manifest.Mode {
-	case bundleModeDryRun, bundleModeExecuted, bundleModeLegacy:
+	case bundleModeDryRun, bundleModeExecuted, bundleModeFailed, bundleModeInterrupted, bundleModeLegacy:
 	default:
 		hints = append(hints, newBundleIntegrityHint(
 			bundleIntegrityHintModeInvalid,
@@ -309,6 +311,20 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 			return assessment, nil
 		}
+	case bundleModeFailed, bundleModeInterrupted:
+		missing := missingBundleArtifacts(runDir, manifest.Mode)
+		if len(missing) > 0 {
+			assessment.Integrity = bundleIntegrityWarn
+			for _, name := range missing {
+				assessment.Hints = append(assessment.Hints, newBundleIntegrityHint(
+					bundleIntegrityHintRunArtifactMissing,
+					"required run artifact missing",
+					name,
+				))
+			}
+			assessment.Hint = fmt.Sprintf("Hint: %s %s is missing failure-trace artifact(s): %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
+			return assessment, nil
+		}
 	default:
 		missing := missingBundleArtifacts(runDir, bundleModeExecuted)
 		if len(missing) > 0 {
@@ -442,6 +458,8 @@ func expectedRunArtifacts(mode bundleMode) []string {
 	switch mode {
 	case bundleModeDryRun:
 		return []string{"prompt.txt"}
+	case bundleModeFailed, bundleModeInterrupted:
+		return []string{"prompt.txt", "execution.json", "stdout.log", "stderr.log"}
 	default:
 		return []string{"result.json", "diff.patch"}
 	}
@@ -451,6 +469,8 @@ func expectedManifestArtifacts(mode bundleMode) []string {
 	switch mode {
 	case bundleModeDryRun:
 		return []string{"prompt.txt"}
+	case bundleModeFailed, bundleModeInterrupted:
+		return []string{"prompt.txt", "execution.json", "stdout.log", "stderr.log"}
 	default:
 		return []string{
 			"prompt.txt",

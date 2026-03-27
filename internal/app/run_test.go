@@ -879,6 +879,28 @@ func TestRunSurfacesClaudeWrapperDrift(t *testing.T) {
 	if snapshot.LastFailureRunDirectory != filepath.Join(paths.RunsDir, "0001") {
 		t.Fatalf("last failure run dir = %q", snapshot.LastFailureRunDirectory)
 	}
+
+	manifest, ok, hints, err := readBundleManifest(filepath.Join(paths.RunsDir, "0001"))
+	if err != nil {
+		t.Fatalf("read bundle manifest: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected failed run bundle manifest")
+	}
+	if len(hints) != 0 {
+		t.Fatalf("unexpected manifest hints: %#v", hints)
+	}
+	if manifest.Mode != bundleModeFailed {
+		t.Fatalf("bundle mode = %q", manifest.Mode)
+	}
+	gotArtifacts := make([]string, 0, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		gotArtifacts = append(gotArtifacts, artifact.Name)
+	}
+	wantArtifacts := []string{"execution.json", "prompt.txt", "stderr.log", "stdout.log"}
+	if strings.Join(gotArtifacts, ",") != strings.Join(wantArtifacts, ",") {
+		t.Fatalf("manifest artifacts = %#v", gotArtifacts)
+	}
 }
 
 func TestRunUsesConfigUntilDoneWhenFlagIsUnset(t *testing.T) {

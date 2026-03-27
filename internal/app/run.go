@@ -404,6 +404,15 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		}
 
 		if ctx.Err() != nil && !execution.TimedOut {
+			if manifestErr := writeBundleManifest(runDir, bundleModeInterrupted, existingArtifacts(runDir,
+				"prompt.txt",
+				"execution.json",
+				"stdout.log",
+				"stderr.log",
+				"result.json",
+			), lockRecovery); manifestErr != nil {
+				return RunReport{}, manifestErr
+			}
 			snapshot.LastStatus = "interrupted"
 			snapshot.LastRunAt = finishedAt.UTC()
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
@@ -423,6 +432,15 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		}
 
 		if runErr != nil {
+			if manifestErr := writeBundleManifest(runDir, bundleModeFailed, existingArtifacts(runDir,
+				"prompt.txt",
+				"execution.json",
+				"stdout.log",
+				"stderr.log",
+				"result.json",
+			), lockRecovery); manifestErr != nil {
+				return RunReport{}, manifestErr
+			}
 			failures++
 			snapshot.TotalFailures++
 			snapshot.LastStatus = "failed"
@@ -641,6 +659,16 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		LastRunDir:          snapshot.LastRunDirectory,
 		Lines:               lines,
 	}, nil
+}
+
+func existingArtifacts(runDir string, names ...string) []string {
+	artifacts := make([]string, 0, len(names))
+	for _, name := range names {
+		if fsutil.FileExists(filepath.Join(runDir, name)) {
+			artifacts = append(artifacts, name)
+		}
+	}
+	return artifacts
 }
 
 func (s *Service) requireRepo(ctx context.Context, workingDir string) (string, error) {

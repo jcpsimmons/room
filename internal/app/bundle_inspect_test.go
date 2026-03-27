@@ -210,4 +210,68 @@ diff --git a/a.txt b/a.txt
 	}
 }
 
+func TestBundleInspectsFailedManifestedRun(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	runDir := filepath.Join(paths.RunsDir, "0001")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "prompt.txt"), []byte("failed prompt\n"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	writeExecutionArtifactForTest(t, runDir, 900, false, "claude wrapper drift detected")
+	if err := os.WriteFile(filepath.Join(runDir, "stdout.log"), []byte("stdout fragment\n"), 0o644); err != nil {
+		t.Fatalf("write stdout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "stderr.log"), []byte("stderr fragment\n"), 0o644); err != nil {
+		t.Fatalf("write stderr: %v", err)
+	}
+	if err := writeBundleManifest(runDir, bundleModeFailed, []string{
+		"prompt.txt",
+		"execution.json",
+		"stdout.log",
+		"stderr.log",
+	}); err != nil {
+		t.Fatalf("write failed bundle manifest: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Bundle(context.Background(), BundleOptions{
+		WorkingDir: repoRoot,
+		RunDir:     "0001",
+	})
+	if err != nil {
+		t.Fatalf("bundle: %v", err)
+	}
+	if report.BundleMode != string(bundleModeFailed) {
+		t.Fatalf("bundle mode = %q", report.BundleMode)
+	}
+	if report.BundleIntegrity != bundleIntegrityOK {
+		t.Fatalf("bundle integrity = %q", report.BundleIntegrity)
+	}
+	if !report.ManifestOK {
+		t.Fatal("expected failed manifest to verify cleanly")
+	}
+	if report.Execution == nil || report.Execution.Error != "claude wrapper drift detected" {
+		t.Fatalf("execution report = %#v", report.Execution)
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"Bundle mode: failed",
+		"Bundle integrity: verified",
+		"error: claude wrapper drift detected",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("bundle output missing %q:\n%s", want, joined)
+		}
+	}
+}
+
 var _ git.Client = gitClientForTailTest{}
