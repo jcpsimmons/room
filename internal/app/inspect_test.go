@@ -165,6 +165,44 @@ func TestInspectReportsPromptStats(t *testing.T) {
 	}
 }
 
+func TestInspectIncludesPromptHistorySignal(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("Improve parser resilience\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	if err := logs.AppendSeenInstruction(paths.SeenInstructionsPath, "Improve parser resilience"); err != nil {
+		t.Fatalf("append seen instruction: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:          repoRoot,
+			statusShort:   " M a.txt",
+			recentCommits: []git.Commit{{Hash: "abc123", Subject: "close the loop"}},
+		},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Inspect(context.Background(), InspectOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+
+	for _, want := range []string{
+		"Prompt history is stagnating: exact duplicate next instruction.",
+		"Matched prior instruction \"Improve parser resilience\".",
+	} {
+		if !strings.Contains(report.Prompt, want) {
+			t.Fatalf("inspect prompt missing %q:\n%s", want, report.Prompt)
+		}
+	}
+	if !strings.Contains(report.RecoveryHint, "Prompt history is stagnating") {
+		t.Fatalf("recovery hint = %q", report.RecoveryHint)
+	}
+}
+
 func TestInspectRedactsSensitivePromptContext(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

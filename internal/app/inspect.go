@@ -76,6 +76,16 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 			recoveryHint = recoveryHint + "\n" + missingInstructionHint
 		}
 	}
+	promptHistoryHint, promptHistoryReplacement := promptHistorySignal(currentInstruction, priorInstructions, summaries)
+	if promptHistoryHint != "" {
+		if strings.TrimSpace(recoveryHint) != "" {
+			recoveryHint += "\n"
+		}
+		recoveryHint += promptHistoryHint
+		if strings.TrimSpace(promptHistoryReplacement) != "" {
+			recoveryHint += "\n" + promptHistoryReplacement
+		}
+	}
 	promptText, promptStats := prompt.BuildDetailed(prompt.BuildInput{
 		CurrentInstruction: currentInstruction,
 		RecoveryHint:       recoveryHint,

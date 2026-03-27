@@ -32,13 +32,15 @@ type DoctorCheck struct {
 }
 
 type DoctorReport struct {
-	RepoRoot string        `json:"repo_root"`
-	Checks   []DoctorCheck `json:"checks"`
-	Lines    []string      `json:"lines"`
+	RepoRoot          string        `json:"repo_root"`
+	Checks            []DoctorCheck `json:"checks"`
+	Lines             []string      `json:"lines"`
+	PromptHistoryHint string        `json:"prompt_history_hint,omitempty"`
 }
 
 func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport, error) {
 	var checks []DoctorCheck
+	promptHistoryHint := ""
 
 	if _, err := exec.LookPath("git"); err != nil {
 		checks = append(checks, DoctorCheck{Name: "git", OK: false, Message: "git is not installed"})
@@ -187,6 +189,21 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	} else {
 		checks = append(checks, DoctorCheck{Name: "history", OK: true, Message: fmt.Sprintf("summary history log parsed %d entrie(s)", len(recentSummaries))})
 	}
+	priorInstructions, err := logs.ReadSeenInstructions(paths.SeenInstructionsPath, cfg.Prompt.MaxSeenInstructions)
+	if err != nil {
+		checks = append(checks, DoctorCheck{Name: "prompt_history", OK: false, Message: fmt.Sprintf("seen instruction history read failed: %v", err)})
+	} else {
+		currentInstruction := ""
+		if instructionBody, readErr := fsutil.ReadFileIfExists(paths.InstructionPath); readErr != nil {
+			checks = append(checks, DoctorCheck{Name: "prompt_history", OK: false, Message: fmt.Sprintf("current instruction read failed: %v", readErr)})
+		} else {
+			currentInstruction = strings.TrimSpace(string(instructionBody))
+		}
+		promptHistoryHint, _ = promptHistorySignal(currentInstruction, priorInstructions, recentSummaries)
+		if promptHistoryHint != "" {
+			checks = append(checks, DoctorCheck{Name: "prompt_history", OK: false, Message: promptHistoryHint})
+		}
+	}
 
 	assessment, err := assessNewestBundle(paths.RunsDir)
 	if err != nil {
@@ -234,9 +251,10 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	}
 
 	return DoctorReport{
-		RepoRoot: repoRoot,
-		Checks:   checks,
-		Lines:    lines,
+		RepoRoot:          repoRoot,
+		Checks:            checks,
+		PromptHistoryHint: promptHistoryHint,
+		Lines:             lines,
 	}, nil
 }
 

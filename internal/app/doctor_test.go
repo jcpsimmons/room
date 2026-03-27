@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/state"
 	"github.com/jcpsimmons/room/internal/version"
 )
@@ -265,6 +266,57 @@ func TestDoctorSurfacesMalformedRoomIgnore(t *testing.T) {
 
 	if !strings.Contains(strings.Join(report.Lines, "\n"), "malformed .roomignore") {
 		t.Fatalf("doctor output missing malformed roomignore hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}
+
+func TestDoctorSurfacesPromptHistoryStagnation(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("Improve parser resilience\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	if err := logs.AppendSeenInstruction(paths.SeenInstructionsPath, "Improve parser resilience"); err != nil {
+		t.Fatalf("append seen instruction: %v", err)
+	}
+	if err := logs.AppendSummary(paths.SummariesPath, logs.SummaryEntry{
+		Iteration: 1,
+		Timestamp: time.Date(2026, 3, 25, 12, 30, 0, 0, time.UTC),
+		Status:    "continue",
+		Summary:   "Kept circling the parser",
+	}); err != nil {
+		t.Fatalf("append summary: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "prompt_history" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected prompt history check to fail, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "exact duplicate next instruction") {
+			t.Fatalf("unexpected prompt history message: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected prompt_history check, got %#v", report.Checks)
+	}
+	if !strings.Contains(report.PromptHistoryHint, "exact duplicate next instruction") {
+		t.Fatalf("prompt history hint = %q", report.PromptHistoryHint)
 	}
 }
 

@@ -35,6 +35,7 @@ type StatusReport struct {
 	LatestBundleIntegrityHints []BundleIntegrityHint `json:"latest_bundle_integrity_hints,omitempty"`
 	LatestLockHint             string                `json:"latest_lock_hint,omitempty"`
 	RoomIgnoreHint             string                `json:"room_ignore_hint,omitempty"`
+	PromptHistoryHint          string                `json:"prompt_history_hint,omitempty"`
 	Dirty                      bool                  `json:"dirty"`
 	Lines                      []string              `json:"lines"`
 }
@@ -57,6 +58,10 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		return StatusReport{}, err
 	}
 	summaries, err := logs.ReadRecentSummaries(paths.SummariesPath, cfg.Prompt.MaxRecentSummaries)
+	if err != nil {
+		return StatusReport{}, err
+	}
+	priorInstructions, err := logs.ReadSeenInstructions(paths.SeenInstructionsPath, cfg.Prompt.MaxSeenInstructions)
 	if err != nil {
 		return StatusReport{}, err
 	}
@@ -122,6 +127,10 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if instructionHint != "" {
 		lines = append(lines, instructionHint)
 	}
+	promptHistoryHint, _ := promptHistorySignal(currentInstruction, priorInstructions, summaries)
+	if promptHistoryHint != "" {
+		lines = append(lines, promptHistoryHint)
+	}
 	lines = append(lines,
 		"Current instruction:",
 		indent(currentInstruction),
@@ -154,6 +163,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		LatestBundleIntegrityHints: assessment.Hints,
 		LatestLockHint:             lockHint,
 		RoomIgnoreHint:             roomIgnoreHint,
+		PromptHistoryHint:          promptHistoryHint,
 		Dirty:                      dirty,
 		Lines:                      lines,
 	}, nil

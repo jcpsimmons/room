@@ -719,7 +719,7 @@ func renderDoctor(report app.DoctorReport) error {
 		if check.Name == "expectation" || (check.Name == "state" && strings.Contains(check.Message, "not initialized")) {
 			notes = append(notes, check.Message)
 		}
-		if check.Name == "bundle" || check.Name == "run_directory" || check.Name == "history" {
+		if check.Name == "bundle" || check.Name == "run_directory" || check.Name == "history" || check.Name == "prompt_history" {
 			notes = append(notes, check.Message)
 		}
 	}
@@ -734,11 +734,11 @@ func renderDoctor(report app.DoctorReport) error {
 const doctorJSONSchemaVersion = 1
 
 type versionedJSONResultLine[T any] struct {
-	SchemaVersion int              `json:"schema_version"`
-	Type          string           `json:"type"`
-	OK            bool             `json:"ok"`
-	Result        T                `json:"result,omitempty"`
-	Error         string           `json:"error,omitempty"`
+	SchemaVersion int    `json:"schema_version"`
+	Type          string `json:"type"`
+	OK            bool   `json:"ok"`
+	Result        T      `json:"result,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 func writeDoctorJSON(w io.Writer, report app.DoctorReport, err error) error {

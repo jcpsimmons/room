@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/version"
 )
 
@@ -119,6 +120,49 @@ func TestStatusSurvivesMissingInstructionFile(t *testing.T) {
 	for _, want := range []string{
 		"Current instruction unavailable: missing instruction.txt.",
 		"Current instruction:",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("status lines missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestStatusSurfacesPromptHistoryStagnation(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("Improve parser resilience\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	if err := logs.AppendSeenInstruction(paths.SeenInstructionsPath, "Improve parser resilience"); err != nil {
+		t.Fatalf("append seen instruction: %v", err)
+	}
+	if err := logs.AppendSummary(paths.SummariesPath, logs.SummaryEntry{
+		Iteration: 1,
+		Timestamp: time.Date(2026, 3, 25, 12, 30, 0, 0, time.UTC),
+		Status:    "continue",
+		Summary:   "Kept circling the parser",
+	}); err != nil {
+		t.Fatalf("append summary: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.PromptHistoryHint == "" {
+		t.Fatal("expected prompt history hint")
+	}
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"Prompt history is stagnating: exact duplicate next instruction.",
+		"Matched prior instruction \"Improve parser resilience\".",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("status lines missing %q:\n%s", want, joined)
