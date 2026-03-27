@@ -21,15 +21,15 @@ type TailOptions struct {
 }
 
 type TailReport struct {
-	RepoRoot          string        `json:"repo_root"`
-	RunDir            string        `json:"run_dir"`
-	BundleMode        string        `json:"bundle_mode,omitempty"`
-	BundleIntegrity   string        `json:"bundle_integrity,omitempty"`
+	RepoRoot             string                `json:"repo_root"`
+	RunDir               string                `json:"run_dir"`
+	BundleMode           string                `json:"bundle_mode,omitempty"`
+	BundleIntegrity      string                `json:"bundle_integrity,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint `json:"bundle_integrity_hints,omitempty"`
-	Prompt            string        `json:"prompt"`
-	Result            *agent.Result `json:"result,omitempty"`
-	Diff              git.DiffStats `json:"diff"`
-	Lines             []string      `json:"lines"`
+	Prompt               string                `json:"prompt"`
+	Result               *agent.Result         `json:"result,omitempty"`
+	Diff                 git.DiffStats         `json:"diff"`
+	Lines                []string              `json:"lines"`
 }
 
 func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error) {
@@ -52,7 +52,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	runDir := assessment.RunDir
 
 	promptPath := filepath.Join(runDir, "prompt.txt")
-	promptBody, err := os.ReadFile(promptPath)
+	promptBody, promptOK, err := readTailPrompt(promptPath)
 	if err != nil {
 		return TailReport{}, err
 	}
@@ -79,7 +79,13 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	}
 	lines = append(lines,
 		"Prompt:",
-		indent(strings.TrimSpace(string(promptBody))),
+	)
+	if promptOK {
+		lines = append(lines, indent(strings.TrimSpace(string(promptBody))))
+	} else {
+		lines = append(lines, indent("unavailable"))
+	}
+	lines = append(lines,
 		"Result:",
 	)
 	if hasResult {
@@ -104,16 +110,27 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	}
 
 	return TailReport{
-		RepoRoot:        repoRoot,
-		RunDir:          runDir,
-		BundleMode:      string(assessment.Mode),
-		BundleIntegrity: assessment.Integrity,
+		RepoRoot:             repoRoot,
+		RunDir:               runDir,
+		BundleMode:           string(assessment.Mode),
+		BundleIntegrity:      assessment.Integrity,
 		BundleIntegrityHints: assessment.Hints,
-		Prompt:          strings.TrimSpace(string(promptBody)),
-		Result:          resultIfPresent(result, hasResult),
-		Diff:            statsIfPresent(stats, hasStats),
-		Lines:           lines,
+		Prompt:               strings.TrimSpace(string(promptBody)),
+		Result:               resultIfPresent(result, hasResult),
+		Diff:                 statsIfPresent(stats, hasStats),
+		Lines:                lines,
 	}, nil
+}
+
+func readTailPrompt(path string) ([]byte, bool, error) {
+	data, err := fsutil.ReadFileIfExists(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(data) == 0 {
+		return nil, false, nil
+	}
+	return data, true, nil
 }
 
 func latestRunBundle(runsDir string) (string, error) {

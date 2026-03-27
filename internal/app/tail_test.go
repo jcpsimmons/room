@@ -103,9 +103,43 @@ diff --git a/b.txt b/b.txt
 		}
 	})
 
-	t.Run("manifested dry run", func(t *testing.T) {
+	t.Run("missing prompt stays readable", func(t *testing.T) {
 		runDir := filepath.Join(paths.RunsDir, "0004")
-		writeTailBundle(t, paths.RunsDir, "0004", "dry-run prompt", nil, "")
+		if err := fsutil.EnsureDir(runDir); err != nil {
+			t.Fatalf("ensure run dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "result.json"), []byte(`{"summary":"lifted","next_instruction":"hold the drone","status":"continue","commit_message":"keep listening"}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write result: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(runDir, "diff.patch"), []byte("diff --git a/a b/a\n"), 0o644); err != nil {
+			t.Fatalf("write diff: %v", err)
+		}
+
+		report, err := svc.Tail(context.Background(), TailOptions{WorkingDir: repoRoot})
+		if err != nil {
+			t.Fatalf("tail: %v", err)
+		}
+		if report.RunDir != runDir {
+			t.Fatalf("run dir = %q", report.RunDir)
+		}
+		if report.Prompt != "" {
+			t.Fatalf("expected empty prompt, got %q", report.Prompt)
+		}
+		joined := strings.Join(report.Lines, "\n")
+		for _, want := range []string{
+			"Prompt:",
+			"unavailable",
+			"summary: lifted",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("tail output missing %q:\n%s", want, joined)
+			}
+		}
+	})
+
+	t.Run("manifested dry run", func(t *testing.T) {
+		runDir := filepath.Join(paths.RunsDir, "0005")
+		writeTailBundle(t, paths.RunsDir, "0005", "dry-run prompt", nil, "")
 		if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}); err != nil {
 			t.Fatalf("write bundle manifest: %v", err)
 		}
