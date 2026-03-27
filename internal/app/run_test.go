@@ -974,6 +974,73 @@ func TestRunDryRunIgnoresRoomStateOnCleanRepo(t *testing.T) {
 	}
 }
 
+func TestRunSkipsPastArchivedBundlesWhenStateLags(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.CurrentIteration = 2
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save lagging state: %v", err)
+	}
+
+	existingRunDir := filepath.Join(paths.RunsDir, "0007")
+	if err := fsutil.EnsureDir(existingRunDir); err != nil {
+		t.Fatalf("ensure archived run dir: %v", err)
+	}
+	const preservedPrompt = "older tape should stay intact\n"
+	if err := os.WriteFile(filepath.Join(existingRunDir, "prompt.txt"), []byte(preservedPrompt), 0o644); err != nil {
+		t.Fatalf("write archived prompt: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot, dirtySeq: []bool{false}},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		DryRun:     true,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	wantRunDir := filepath.Join(paths.RunsDir, "0008")
+	if report.LastRunDir != wantRunDir {
+		t.Fatalf("last run dir = %q, want %q", report.LastRunDir, wantRunDir)
+	}
+	if !containsLine(report.Lines, "Run archive was ahead of state (2 vs bundle 0007); routing this pass to iteration 8 to avoid overwriting tape.") {
+		t.Fatalf("run lines missing archive drift note:\n%s", strings.Join(report.Lines, "\n"))
+	}
+
+	archivedPrompt, err := os.ReadFile(filepath.Join(existingRunDir, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("read archived prompt: %v", err)
+	}
+	if string(archivedPrompt) != preservedPrompt {
+		t.Fatalf("archived prompt was overwritten: %q", string(archivedPrompt))
+	}
+
+	if _, err := os.Stat(filepath.Join(wantRunDir, "prompt.txt")); err != nil {
+		t.Fatalf("expected new prompt in %s: %v", wantRunDir, err)
+	}
+
+	updated, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("reload state: %v", err)
+	}
+	if updated.CurrentIteration != 8 {
+		t.Fatalf("current iteration = %d, want 8", updated.CurrentIteration)
+	}
+}
+
 func TestRunUsesClaudeProviderWhenConfigured(t *testing.T) {
 	repoRoot := t.TempDir()
 	cfg, paths := prepareInitializedRepo(t, repoRoot)

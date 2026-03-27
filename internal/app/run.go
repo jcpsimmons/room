@@ -275,7 +275,13 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			}, ctx.Err()
 		}
 
-		nextIteration := snapshot.CurrentIteration + 1
+		nextIteration, archiveNote, err := nextRunIteration(paths.RunsDir, snapshot.CurrentIteration)
+		if err != nil {
+			return RunReport{}, err
+		}
+		if archiveNote != "" {
+			lines = append(lines, archiveNote)
+		}
 		emitter.Emit(RunProgressEvent{
 			Phase:               RunProgressPhaseIterationStart,
 			RepoRoot:            repoRoot,
@@ -671,6 +677,27 @@ func readTrimmed(path string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+func nextRunIteration(runsDir string, stateIteration int) (int, string, error) {
+	next := stateIteration + 1
+	bundles, err := runBundles(runsDir)
+	if err != nil {
+		return 0, "", err
+	}
+	if len(bundles) == 0 {
+		return next, "", nil
+	}
+	latest := bundles[0].seq
+	if latest < next {
+		return next, "", nil
+	}
+	return latest + 1, fmt.Sprintf(
+		"Run archive was ahead of state (%d vs bundle %04d); routing this pass to iteration %d to avoid overwriting tape.",
+		stateIteration,
+		latest,
+		latest+1,
+	), nil
 }
 
 func indent(value string) string {
