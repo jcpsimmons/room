@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,20 +51,12 @@ func ReadRecentSummaries(path string, limit int) (entries []SummaryEntry, err er
 	if limit <= 0 {
 		return nil, nil
 	}
-	f, err := os.Open(path)
+	lines, err := readLogLines(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	defer func() {
-		err = errors.Join(err, f.Close())
-	}()
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for _, line := range lines {
 		if line == "" {
 			continue
 		}
@@ -72,9 +65,6 @@ func ReadRecentSummaries(path string, limit int) (entries []SummaryEntry, err er
 			continue
 		}
 		entries = append(entries, entry)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
 	}
 	if len(entries) <= limit {
 		return entries, nil
@@ -106,6 +96,24 @@ func ReadSeenInstructions(path string, limit int) (values []string, err error) {
 	if limit <= 0 {
 		return nil, nil
 	}
+	lines, err := readLogLines(path)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			values = append(values, line)
+		}
+	}
+	if len(values) <= limit {
+		return values, nil
+	}
+	return values[len(values)-limit:], nil
+}
+
+func readLogLines(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -114,21 +122,22 @@ func ReadSeenInstructions(path string, limit int) (values []string, err error) {
 		return nil, err
 	}
 	defer func() {
-		err = errors.Join(err, f.Close())
+		_ = f.Close()
 	}()
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	reader := bufio.NewReader(f)
+	var lines []string
+	for {
+		line, readErr := reader.ReadString('\n')
 		if line != "" {
-			values = append(values, line)
+			lines = append(lines, strings.TrimRight(line, "\r\n"))
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, readErr
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if len(values) <= limit {
-		return values, nil
-	}
-	return values[len(values)-limit:], nil
+	return lines, nil
 }
