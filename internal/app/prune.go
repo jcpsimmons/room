@@ -47,9 +47,10 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		return PruneReport{}, err
 	}
 
-	protectedRunDir := ""
+	protectedBundles := map[string][]string{}
 	if snapshot, err := state.Load(paths.StatePath); err == nil {
-		protectedRunDir = strings.TrimSpace(snapshot.LastRunDirectory)
+		addProtectedBundleReference(protectedBundles, snapshot.LastRunDirectory, "last run")
+		addProtectedBundleReference(protectedBundles, snapshot.LastFailureRunDirectory, "last failure")
 	}
 
 	report := PruneReport{
@@ -72,11 +73,6 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		return report, nil
 	}
 
-	protectedBundle := ""
-	if protectedRunDir != "" {
-		protectedBundle = filepath.Clean(protectedRunDir)
-	}
-
 	kept := make([]string, 0, opts.Keep+1)
 	var removals []runBundle
 	for i, bundle := range bundles {
@@ -84,7 +80,7 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 			kept = append(kept, bundle.path)
 			continue
 		}
-		if protectedBundle != "" && filepath.Clean(bundle.path) == protectedBundle {
+		if _, ok := protectedBundles[filepath.Clean(bundle.path)]; ok {
 			kept = append(kept, bundle.path)
 			continue
 		}
@@ -97,14 +93,14 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		action = "would remove"
 	}
 	if len(removals) == 0 {
-		if protectedBundle != "" {
+		if len(protectedBundles) > 0 {
 			lines = append(lines, "Nothing to prune; state.json keeps an older bundle alive.")
 		} else {
 			lines = append(lines, "Nothing to prune.")
 		}
 		for _, kept := range report.Kept {
-			if protectedBundle != "" && filepath.Clean(kept) == protectedBundle {
-				lines = append(lines, "kept "+kept+" (referenced by state.json)")
+			if reasons, ok := protectedBundles[filepath.Clean(kept)]; ok {
+				lines = append(lines, "kept "+kept+formatStateReferenceSuffix(reasons))
 				continue
 			}
 			lines = append(lines, "kept "+kept)
@@ -127,12 +123,33 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		lines = append(lines, "Dry run only; nothing was deleted.")
 	}
 	for _, kept := range report.Kept {
-		if protectedBundle != "" && filepath.Clean(kept) == protectedBundle {
-			lines = append(lines, "kept "+kept+" (referenced by state.json)")
+		if reasons, ok := protectedBundles[filepath.Clean(kept)]; ok {
+			lines = append(lines, "kept "+kept+formatStateReferenceSuffix(reasons))
 			continue
 		}
 		lines = append(lines, "kept "+kept)
 	}
 	report.Lines = lines
 	return report, nil
+}
+
+func addProtectedBundleReference(protected map[string][]string, bundleDir, reason string) {
+	bundleDir = filepath.Clean(strings.TrimSpace(bundleDir))
+	if bundleDir == "." || bundleDir == "" {
+		return
+	}
+	reasons := protected[bundleDir]
+	for _, existing := range reasons {
+		if existing == reason {
+			return
+		}
+	}
+	protected[bundleDir] = append(reasons, reason)
+}
+
+func formatStateReferenceSuffix(reasons []string) string {
+	if len(reasons) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (referenced by state.json %s)", strings.Join(reasons, " and "))
 }
