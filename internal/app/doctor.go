@@ -144,6 +144,26 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	} else {
 		checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: "ROOM is not initialized yet; `room init` will create state files"})
 	}
+
+	latestRunDir, bundleHint, err := newestBundleHint(paths.RunsDir)
+	if err != nil {
+		checks = append(checks, DoctorCheck{Name: "bundle", OK: false, Message: err.Error()})
+	} else if bundleHint != "" {
+		checks = append(checks, DoctorCheck{Name: "bundle", OK: false, Message: bundleHint})
+	}
+	if latestRunDir != "" && fsutil.FileExists(paths.StatePath) {
+		snapshot, err := state.Load(paths.StatePath)
+		if err != nil {
+			checks = append(checks, DoctorCheck{Name: "run_directory", OK: false, Message: fmt.Sprintf("state load failed: %v", err)})
+		} else if lastRunDir := strings.TrimSpace(snapshot.LastRunDirectory); lastRunDir != "" && filepath.Clean(lastRunDir) != filepath.Clean(latestRunDir) {
+			checks = append(checks, DoctorCheck{
+				Name:    "run_directory",
+				OK:      false,
+				Message: fmt.Sprintf("state points at %s but newest bundle is %s", lastRunDir, latestRunDir),
+			})
+		}
+	}
+
 	writeTarget := filepath.Join(repoRoot, ".room-doctor-write-test")
 	if fsutil.DirExists(paths.RoomDir) {
 		writeTarget = filepath.Join(paths.RoomDir, ".doctor-write-test")

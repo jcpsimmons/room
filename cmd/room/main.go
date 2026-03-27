@@ -551,6 +551,9 @@ func renderDoctor(report app.DoctorReport) error {
 		if check.Name == "expectation" || (check.Name == "state" && strings.Contains(check.Message, "not initialized")) {
 			notes = append(notes, check.Message)
 		}
+		if check.Name == "bundle" || check.Name == "run_directory" {
+			notes = append(notes, check.Message)
+		}
 	}
 
 	return renderBlock(ui.RenderDoctor(ui.DoctorSummary{
