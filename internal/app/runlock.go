@@ -22,23 +22,23 @@ func runLockPath(roomDir string) string {
 	return filepath.Join(roomDir, "run.lock.json")
 }
 
-func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() error, error) {
+func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() error, string, error) {
 	path := runLockPath(roomDir)
 	if err := fsutil.EnsureDir(roomDir); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	existing, err := readRunLock(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if existing.PID > 0 {
 		alive, err := s.processAlive(existing.PID)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if alive {
-			return nil, fmt.Errorf("another ROOM run is already active (pid %d started %s)", existing.PID, existing.StartedAt.UTC().Format(time.RFC3339))
+			return nil, "", fmt.Errorf("another ROOM run is already active (pid %d started %s)", existing.PID, existing.StartedAt.UTC().Format(time.RFC3339))
 		}
 	}
 
@@ -50,7 +50,12 @@ func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() err
 		RoomVersion: s.version.Version,
 	}
 	if err := writeRunLock(path, lock); err != nil {
-		return nil, err
+		return nil, "", err
+	}
+
+	lockNote := ""
+	if existing.PID > 0 {
+		lockNote = fmt.Sprintf("Reclaimed stale run lock from pid %d started %s.", existing.PID, existing.StartedAt.UTC().Format(time.RFC3339))
 	}
 
 	release := func() error {
@@ -67,7 +72,7 @@ func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() err
 		return nil
 	}
 
-	return release, nil
+	return release, lockNote, nil
 }
 
 func readRunLock(path string) (runLock, error) {

@@ -299,6 +299,9 @@ func TestRunReclaimsAStaleRunLock(t *testing.T) {
 	if report.CompletedIterations != 1 {
 		t.Fatalf("completed iterations = %d", report.CompletedIterations)
 	}
+	if !containsLine(report.Lines, "Reclaimed stale run lock from pid 4242 started 2026-03-25T11:00:00Z.") {
+		t.Fatalf("run lines missing stale lock recovery note:\n%s", strings.Join(report.Lines, "\n"))
+	}
 	if _, err := os.Stat(lockPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected stale lock to be cleaned up, stat err=%v", err)
 	}

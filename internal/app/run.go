@@ -177,7 +177,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	snapshot.LastProvider = provider
 	snapshot.LastProviderVersion = providerVersion
 
-	releaseLock, err := s.acquireRunLock(paths.RoomDir, repoRoot, provider)
+	releaseLock, lockNote, err := s.acquireRunLock(paths.RoomDir, repoRoot, provider)
 	if err != nil {
 		return RunReport{}, err
 	}
@@ -198,6 +198,9 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		fmt.Sprintf("Provider: %s", agent.DisplayName(provider)),
 		fmt.Sprintf("Iterations requested: %d", opts.Iterations),
 		fmt.Sprintf("Commit mode: %t", commitEnabled),
+	}
+	if lockNote != "" {
+		lines = append(lines, lockNote)
 	}
 
 	failures := 0
