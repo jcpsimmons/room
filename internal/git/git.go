@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"unicode"
 
 	ignore "github.com/sabhiram/go-gitignore"
 )
@@ -246,7 +247,7 @@ type statusEntry struct {
 }
 
 func statusEntries(ctx context.Context, dir string) ([]statusEntry, error) {
-	raw, err := runRaw(ctx, dir, "status", "--short", "--untracked-files=all", "--", ".")
+	raw, err := runRawBytes(ctx, dir, "status", "--short", "-z", "--untracked-files=all", "--", ".")
 	if err != nil {
 		return nil, err
 	}
@@ -255,12 +256,16 @@ func statusEntries(ctx context.Context, dir string) ([]statusEntry, error) {
 		return nil, err
 	}
 	var entries []statusEntry
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
+	records := bytes.Split(raw, []byte{0})
+	for i := 0; i < len(records); i++ {
+		record := records[i]
+		if len(record) == 0 {
 			continue
 		}
-		entry := parseStatusEntry(line)
+		entry, consumed := parseStatusEntry(record, records[i+1:])
+		if consumed > 0 {
+			i += consumed
+		}
 		if entry.primary == "" || ignoredEntry(entry, matcher) {
 			continue
 		}
@@ -289,23 +294,41 @@ func changedPaths(ctx context.Context, dir string, trackedOnly bool) ([]string, 
 	return paths, nil
 }
 
-func parseStatusEntry(line string) statusEntry {
+func parseStatusEntry(record []byte, rest [][]byte) (statusEntry, int) {
+	line := string(record)
 	if len(line) < 4 {
-		return statusEntry{raw: strings.TrimSpace(line)}
+		return statusEntry{raw: strings.TrimSpace(line)}, 0
 	}
-	pathText := strings.TrimSpace(line[3:])
+	code := line[:2]
+	pathText := line[3:]
 	paths := []string{pathText}
 	primary := pathText
-	if before, after, ok := strings.Cut(pathText, " -> "); ok {
-		paths = []string{strings.TrimSpace(before), strings.TrimSpace(after)}
-		primary = strings.TrimSpace(after)
+	raw := code + " " + formatStatusPath(pathText)
+	if (code[0] == 'R' || code[0] == 'C') && len(rest) > 0 && len(rest[0]) > 0 {
+		previous := string(rest[0])
+		paths = []string{pathText, previous}
+		primary = pathText
+		raw = code + " " + formatStatusPath(previous) + " -> " + formatStatusPath(pathText)
+		return statusEntry{
+			code:    code,
+			raw:     raw,
+			paths:   paths,
+			primary: primary,
+		}, 1
 	}
 	return statusEntry{
-		code:    line[:2],
-		raw:     line,
+		code:    code,
+		raw:     raw,
 		paths:   paths,
 		primary: primary,
+	}, 0
+}
+
+func formatStatusPath(path string) string {
+	if strings.IndexFunc(path, unicode.IsSpace) >= 0 || strings.ContainsAny(path, "\"\\") {
+		return strconv.Quote(path)
 	}
+	return path
 }
 
 func ignoredEntry(entry statusEntry, matcher ignore.IgnoreParser) bool {
@@ -384,6 +407,14 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := runRawBytes(ctx, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func runRawBytes(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -394,7 +425,7 @@ func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), msg)
+		return nil, fmt.Errorf("git %s failed: %s", strings.Join(args, " "), msg)
 	}
-	return stdout.String(), nil
+	return stdout.Bytes(), nil
 }

@@ -228,6 +228,76 @@ func TestCommitAllSkipsRoomIgnoreMatches(t *testing.T) {
 	}
 }
 
+func TestSpacedPathsFlowThroughStatusDiffAndCommit(t *testing.T) {
+	t.Parallel()
+
+	repo := setupGitRepo(t)
+	writeFile(t, filepath.Join(repo, "space name.txt"), "base\n")
+	runGit(t, repo, "add", "space name.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	writeFile(t, filepath.Join(repo, "space name.txt"), "base\nchange\n")
+
+	client := NewClient()
+	ctx := context.Background()
+
+	status, err := client.StatusShort(ctx, repo)
+	if err != nil {
+		t.Fatalf("status short: %v", err)
+	}
+	if !strings.Contains(status, "space name.txt") {
+		t.Fatalf("expected spaced file in status, got %q", status)
+	}
+
+	diff, err := client.Diff(ctx, repo)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	if !strings.Contains(diff, "space name.txt") {
+		t.Fatalf("expected spaced file in diff, got %q", diff)
+	}
+
+	if _, err := client.CommitAll(ctx, repo, "room: commit spaced file"); err != nil {
+		t.Fatalf("commit all: %v", err)
+	}
+
+	headPaths := runGit(t, repo, "show", "--pretty=format:", "--name-only", "HEAD")
+	if !strings.Contains(headPaths, "space name.txt") {
+		t.Fatalf("expected spaced file in HEAD, got %q", headPaths)
+	}
+}
+
+func TestRenameEntriesPreserveBothPathsForCommitAll(t *testing.T) {
+	t.Parallel()
+
+	repo := setupGitRepo(t)
+	writeFile(t, filepath.Join(repo, "old space.txt"), "base\n")
+	runGit(t, repo, "add", "old space.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	runGit(t, repo, "mv", "old space.txt", "new space.txt")
+
+	client := NewClient()
+	ctx := context.Background()
+
+	status, err := client.StatusShort(ctx, repo)
+	if err != nil {
+		t.Fatalf("status short: %v", err)
+	}
+	if !strings.Contains(status, "old space.txt") || !strings.Contains(status, "new space.txt") {
+		t.Fatalf("expected rename paths in status, got %q", status)
+	}
+
+	if _, err := client.CommitAll(ctx, repo, "room: rename spaced file"); err != nil {
+		t.Fatalf("commit all: %v", err)
+	}
+
+	nameStatus := runGit(t, repo, "show", "--pretty=format:", "--name-status", "HEAD")
+	if !strings.Contains(nameStatus, "old space.txt") || !strings.Contains(nameStatus, "new space.txt") {
+		t.Fatalf("expected rename paths in HEAD, got %q", nameStatus)
+	}
+}
+
 func setupGitRepo(t *testing.T) string {
 	t.Helper()
 
