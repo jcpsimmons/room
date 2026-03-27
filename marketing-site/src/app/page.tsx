@@ -139,7 +139,8 @@ const signalContract = [
   },
   {
     label: "Escape hatch",
-    value: "When the loop stalls, ROOM rewrites the next instruction into a pivot.",
+    value:
+      "When the loop stalls, ROOM rewrites the next instruction into a pivot.",
   },
 ] as const;
 
@@ -306,14 +307,15 @@ export default function HomePage() {
         <article className="panel panel--contract">
           <div className="section-heading">
             <p className="eyebrow">Signal contract</p>
-            <h2>ROOM stays local, keeps the tape, and refuses to hallucinate momentum.</h2>
+            <h2>
+              ROOM stays local, keeps the tape, and refuses to hallucinate
+              momentum.
+            </h2>
           </div>
           <div className="contract-panel">
             {signalContract.map((item, index) => (
               <article key={item.label} className="contract-node">
-                <span className="contract-node__index">
-                  0{index + 1}
-                </span>
+                <span className="contract-node__index">0{index + 1}</span>
                 <h3>{item.label}</h3>
                 <p>{item.value}</p>
               </article>

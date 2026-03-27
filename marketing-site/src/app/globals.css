@@ -805,7 +805,11 @@ a {
   border-radius: 1.3rem;
   border: 2px solid rgba(9, 17, 24, 0.1);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.34)),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.66),
+      rgba(255, 255, 255, 0.34)
+    ),
     rgba(255, 255, 255, 0.26);
 }
 

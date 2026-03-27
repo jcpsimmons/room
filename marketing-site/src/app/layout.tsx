@@ -23,26 +23,53 @@ const mono = IBM_Plex_Mono({
   display: "swap",
 });
 
+const roomGlyph =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='24' fill='%23081214'/%3E%3Ccircle cx='39' cy='45' r='15' fill='%23d8ff45'/%3E%3Ccircle cx='88' cy='39' r='13' fill='%23ff6b3d'/%3E%3Cpath d='M24 91c9-22 26-33 50-33 18 0 29 6 44 21' stroke='%237df9ff' stroke-width='10' fill='none' stroke-linecap='round'/%3E%3C/svg%3E";
+
+const title = "ROOM | Repetitively Obsessively Optimize Me";
+const description =
+  "ROOM is a tactile, operator-grade landing page for a CLI that runs cold-start repo improvement loops with Codex or Claude Code.";
+
 export const metadata: Metadata = {
-  title: "ROOM | Repetitively Obsessively Optimize Me",
-  description:
-    "ROOM is a tactile, operator-grade landing page for a CLI that runs cold-start repo improvement loops with Codex or Claude Code.",
+  title,
+  description,
+  applicationName: "ROOM",
+  category: "developer tools",
+  keywords: [
+    "ROOM",
+    "Codex",
+    "Claude Code",
+    "repo automation",
+    "cold start",
+    "operator tooling",
+  ],
+  creator: "jcpsimmons",
+  publisher: "jcpsimmons",
   openGraph: {
-    title: "ROOM | Repetitively Obsessively Optimize Me",
+    title,
     description:
       "Recursive repo improvement with cold starts, artifact tape, forced pivots, and a live control-surface attitude.",
     type: "website",
+    siteName: "ROOM",
+    images: [
+      {
+        url: roomGlyph,
+        width: 128,
+        height: 128,
+        alt: "ROOM signal glyph",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "ROOM | Repetitively Obsessively Optimize Me",
-    description:
-      "Recursive repo improvement with cold starts, artifact tape, forced pivots, and a live control-surface attitude.",
+    title,
+    description,
+    images: [roomGlyph],
   },
   icons: {
     icon: [
       {
-        url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='24' fill='%23081214'/%3E%3Ccircle cx='39' cy='45' r='15' fill='%23d8ff45'/%3E%3Ccircle cx='88' cy='39' r='13' fill='%23ff6b3d'/%3E%3Cpath d='M24 91c9-22 26-33 50-33 18 0 29 6 44 21' stroke='%237df9ff' stroke-width='10' fill='none' stroke-linecap='round'/%3E%3C/svg%3E",
+        url: roomGlyph,
         type: "image/svg+xml",
       },
     ],
