@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/git"
@@ -41,68 +40,20 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 		cfg.Prompt.InstructionFile = opts.InstructionFile
 		paths = config.ResolvePaths(repoRoot, opts.ConfigPath, cfg)
 	}
-	summaries, err := logs.ReadRecentSummaries(paths.SummariesPath, cfg.Prompt.MaxRecentSummaries)
+	prepared, err := s.preparePrompt(ctx, repoRoot, cfg, paths, false)
 	if err != nil {
 		return InspectReport{}, err
 	}
-	priorInstructions, err := logs.ReadSeenInstructions(paths.SeenInstructionsPath, cfg.Prompt.MaxSeenInstructions)
-	if err != nil {
-		return InspectReport{}, err
-	}
-	assessment, err := assessNewestBundle(paths.RunsDir)
-	if err != nil {
-		return InspectReport{}, err
-	}
-	commits, err := s.git.RecentCommits(ctx, repoRoot, 10)
-	if err != nil {
-		return InspectReport{}, err
-	}
-	gitStatus, err := s.git.StatusShort(ctx, repoRoot)
-	if err != nil {
-		return InspectReport{}, err
-	}
-	instructionSignal, err := loadInstructionSignal(paths.InstructionPath)
-	if err != nil {
-		return InspectReport{}, err
-	}
-	currentInstruction := instructionSignal.Body
-	recoveryHint := assessment.Hint
-	if strings.TrimSpace(instructionSignal.Hint) != "" {
-		if strings.TrimSpace(recoveryHint) == "" {
-			recoveryHint = instructionSignal.Hint
-		} else {
-			recoveryHint = recoveryHint + "\n" + instructionSignal.Hint
-		}
-	}
-	promptHistoryHint, promptHistoryReplacement := promptHistorySignal(currentInstruction, priorInstructions, summaries, commits)
-	if promptHistoryHint != "" {
-		if strings.TrimSpace(recoveryHint) != "" {
-			recoveryHint += "\n"
-		}
-		recoveryHint += promptHistoryHint
-		if strings.TrimSpace(promptHistoryReplacement) != "" {
-			recoveryHint += "\n" + promptHistoryReplacement
-		}
-	}
-	promptText, promptStats := prompt.BuildDetailed(prompt.BuildInput{
-		CurrentInstruction: currentInstruction,
-		RecoveryHint:       recoveryHint,
-		RecentSummaries:    summaries,
-		PriorInstructions:  priorInstructions,
-		RecentCommits:      commits,
-		GitStatus:          gitStatus,
-		RepoPath:           repoRoot,
-	})
 
 	return InspectReport{
 		RepoRoot:           repoRoot,
-		Prompt:             promptText,
-		PromptStats:        promptStats,
-		CurrentInstruction: currentInstruction,
-		RecoveryHint:       recoveryHint,
-		RecentSummaries:    summaries,
-		PriorInstructions:  priorInstructions,
-		RecentCommits:      commits,
-		GitStatus:          gitStatus,
+		Prompt:             prepared.body,
+		PromptStats:        prepared.stats,
+		CurrentInstruction: prepared.currentInstruction,
+		RecoveryHint:       prepared.recoveryHint,
+		RecentSummaries:    prepared.recentSummaries,
+		PriorInstructions:  prepared.priorInstructions,
+		RecentCommits:      prepared.recentCommits,
+		GitStatus:          prepared.gitStatus,
 	}, nil
 }

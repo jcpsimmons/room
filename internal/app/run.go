@@ -294,39 +294,18 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			CommitEnabled:       commitEnabled,
 		})
 		runDir := filepath.Join(paths.RunsDir, fmt.Sprintf("%04d", nextIteration))
+
+		prepared, err := s.preparePrompt(ctx, repoRoot, cfg, paths, true)
+		if err != nil {
+			return RunReport{}, err
+		}
+		summaries := prepared.recentSummaries
+		priorInstructions := prepared.priorInstructions
+		commits := prepared.recentCommits
+		promptBody := prepared.body
 		if err := fsutil.EnsureDir(runDir); err != nil {
 			return RunReport{}, err
 		}
-
-		currentInstruction, err := requireInstructionSignal(paths.InstructionPath)
-		if err != nil {
-			return RunReport{}, err
-		}
-		summaries, err := logs.ReadRecentSummaries(paths.SummariesPath, cfg.Prompt.MaxRecentSummaries)
-		if err != nil {
-			return RunReport{}, err
-		}
-		priorInstructions, err := logs.ReadSeenInstructions(paths.SeenInstructionsPath, cfg.Prompt.MaxSeenInstructions)
-		if err != nil {
-			return RunReport{}, err
-		}
-		commits, err := s.git.RecentCommits(ctx, repoRoot, 10)
-		if err != nil {
-			return RunReport{}, err
-		}
-		gitStatus, err := s.git.StatusShort(ctx, repoRoot)
-		if err != nil {
-			return RunReport{}, err
-		}
-
-		promptBody := prompt.Build(prompt.BuildInput{
-			CurrentInstruction: currentInstruction,
-			RecentSummaries:    summaries,
-			PriorInstructions:  priorInstructions,
-			RecentCommits:      commits,
-			GitStatus:          gitStatus,
-			RepoPath:           repoRoot,
-		})
 		promptPath := filepath.Join(runDir, "prompt.txt")
 		if err := fsutil.AtomicWriteFile(promptPath, []byte(promptBody), 0o644); err != nil {
 			return RunReport{}, err

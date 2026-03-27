@@ -257,6 +257,116 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
 	}
 }
 
+func TestRunIncludesBundleFaultSignalInPrompt(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	writeTailBundle(t, paths.RunsDir, "0001", "older prompt", &agent.Result{
+		Summary:         "Closed the loop",
+		NextInstruction: "Listen for drift",
+		Status:          "continue",
+		CommitMessage:   "close the loop",
+	}, strings.TrimSpace(`
+diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1,2 @@
+-old
++old
++new
+`))
+	writeTailBundle(t, paths.RunsDir, "0002", "newest prompt", nil, "")
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:          repoRoot,
+			statusShort:   " M a.txt",
+			recentCommits: []git.Commit{{Hash: "abc123", Subject: "close the loop"}},
+		},
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+		Providers: testProviders(&fakeRunner{
+			version: "codex-cli 0.116.0",
+		}, nil),
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		DryRun:     true,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	promptData, err := os.ReadFile(filepath.Join(report.LastRunDir, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("read prompt: %v", err)
+	}
+	promptText := string(promptData)
+
+	for _, want := range []string{
+		"Artifact fault signal:",
+		"Hint: newest bundle 0002 is incomplete; missing result.json and diff.patch.",
+	} {
+		if !strings.Contains(promptText, want) {
+			t.Fatalf("run prompt missing %q:\n%s", want, promptText)
+		}
+	}
+}
+
+func TestRunIncludesPromptHistorySignalInPrompt(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("Improve parser resilience\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	if err := logs.AppendSeenInstruction(paths.SeenInstructionsPath, "Improve parser resilience"); err != nil {
+		t.Fatalf("append seen instruction: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:          repoRoot,
+			statusShort:   " M a.txt",
+			recentCommits: []git.Commit{{Hash: "abc123", Subject: "close the loop"}},
+		},
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+		Providers: testProviders(&fakeRunner{
+			version: "codex-cli 0.116.0",
+		}, nil),
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		DryRun:     true,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	promptData, err := os.ReadFile(filepath.Join(report.LastRunDir, "prompt.txt"))
+	if err != nil {
+		t.Fatalf("read prompt: %v", err)
+	}
+	promptText := string(promptData)
+
+	for _, want := range []string{
+		"Prompt history is stagnating: exact duplicate next instruction.",
+		"Matched prior instruction \"Improve parser resilience\".",
+		"Pivot hard. The prior direction is stagnating because of exact duplicate next instruction.",
+	} {
+		if !strings.Contains(promptText, want) {
+			t.Fatalf("run prompt missing %q:\n%s", want, promptText)
+		}
+	}
+}
+
 func TestRunRejectsBlankInstructionFile(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, paths := prepareInitializedRepo(t, repoRoot)
