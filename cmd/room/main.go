@@ -397,6 +397,8 @@ func runWithJSON(ctx context.Context, svc *app.Service, opts app.RunOptions) err
 	return errors.Join(err, stream.Err())
 }
 
+const runJSONSchemaVersion = 1
+
 type jsonLineWriter struct {
 	enc *json.Encoder
 	err error
@@ -420,20 +422,22 @@ func (w *jsonLineWriter) Err() error {
 }
 
 type runJSONProgressEvent struct {
-	Type string `json:"type"`
+	SchemaVersion int `json:"schema_version"`
+	Type          string `json:"type"`
 	app.RunProgressEvent
 	Error string `json:"error,omitempty"`
 }
 
 type runJSONResultLine struct {
-	Type   string        `json:"type"`
-	OK     bool          `json:"ok"`
-	Result app.RunReport `json:"result,omitempty"`
-	Error  string        `json:"error,omitempty"`
+	SchemaVersion int           `json:"schema_version"`
+	Type          string        `json:"type"`
+	OK            bool          `json:"ok"`
+	Result        app.RunReport `json:"result,omitempty"`
+	Error         string        `json:"error,omitempty"`
 }
 
 func makeRunJSONProgressLine(event app.RunProgressEvent) runJSONProgressEvent {
-	line := runJSONProgressEvent{Type: "progress", RunProgressEvent: event}
+	line := runJSONProgressEvent{SchemaVersion: runJSONSchemaVersion, Type: "progress", RunProgressEvent: event}
 	if event.Err != nil {
 		line.Error = event.Err.Error()
 	}
@@ -442,10 +446,11 @@ func makeRunJSONProgressLine(event app.RunProgressEvent) runJSONProgressEvent {
 
 func makeRunJSONResultLine(report app.RunReport, err error) runJSONResultLine {
 	return runJSONResultLine{
-		Type:   "result",
-		OK:     err == nil,
-		Result: report,
-		Error:  errorText(err, ""),
+		SchemaVersion: runJSONSchemaVersion,
+		Type:          "result",
+		OK:            err == nil,
+		Result:        report,
+		Error:         errorText(err, ""),
 	}
 }
 

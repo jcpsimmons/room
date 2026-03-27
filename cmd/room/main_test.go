@@ -170,6 +170,9 @@ func TestRunJSONStreamEncoding(t *testing.T) {
 	if progress["type"] != "progress" {
 		t.Fatalf("progress type = %v", progress["type"])
 	}
+	if progress["schema_version"] != float64(runJSONSchemaVersion) {
+		t.Fatalf("progress schema_version = %v", progress["schema_version"])
+	}
 	if progress["phase"] != string(app.RunProgressPhaseIterationFailure) {
 		t.Fatalf("progress phase = %v", progress["phase"])
 	}
@@ -183,6 +186,9 @@ func TestRunJSONStreamEncoding(t *testing.T) {
 	}
 	if result["type"] != "result" {
 		t.Fatalf("result type = %v", result["type"])
+	}
+	if result["schema_version"] != float64(runJSONSchemaVersion) {
+		t.Fatalf("result schema_version = %v", result["schema_version"])
 	}
 	if got, ok := result["ok"].(bool); !ok || got {
 		t.Fatalf("expected failure result, got ok=true")
