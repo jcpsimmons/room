@@ -2,6 +2,7 @@ package logs
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,5 +101,65 @@ func TestReadSeenInstructionsHandlesOversizedLines(t *testing.T) {
 	}
 	if loaded[0] != oversized || loaded[1] != "beta" {
 		t.Fatalf("loaded instructions = %#v", loaded)
+	}
+}
+
+func TestReadRecentLogsReturnTailEntriesFromLargeFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	summariesPath := filepath.Join(dir, "summaries.log")
+	seenPath := filepath.Join(dir, "seen.log")
+
+	var summaries strings.Builder
+	var seen strings.Builder
+	for i := 1; i <= 512; i++ {
+		summary := SummaryEntry{
+			Iteration: i,
+			Timestamp: time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute),
+			Status:    "continue",
+			Summary:   strings.Repeat("x", 64_000),
+		}
+		if i >= 511 {
+			summary.Summary = fmt.Sprintf("tail-%d", i)
+		}
+		data, err := json.Marshal(summary)
+		if err != nil {
+			t.Fatalf("marshal summary: %v", err)
+		}
+		summaries.Write(data)
+		summaries.WriteByte('\n')
+
+		instruction := strings.Repeat("y", 64_000)
+		if i >= 511 {
+			instruction = fmt.Sprintf("tail-%d", i)
+		}
+		seen.WriteString(instruction)
+		seen.WriteByte('\n')
+	}
+	if err := os.WriteFile(summariesPath, []byte(summaries.String()), 0o644); err != nil {
+		t.Fatalf("write summaries: %v", err)
+	}
+	if err := os.WriteFile(seenPath, []byte(seen.String()), 0o644); err != nil {
+		t.Fatalf("write seen instructions: %v", err)
+	}
+
+	loadedSummaries, err := ReadRecentSummaries(summariesPath, 2)
+	if err != nil {
+		t.Fatalf("read recent summaries: %v", err)
+	}
+	if len(loadedSummaries) != 2 || loadedSummaries[0].Iteration != 511 || loadedSummaries[1].Iteration != 512 {
+		t.Fatalf("loaded summaries = %#v", loadedSummaries)
+	}
+	if loadedSummaries[0].Summary != "tail-511" || loadedSummaries[1].Summary != "tail-512" {
+		t.Fatalf("loaded summary tail = %#v", loadedSummaries)
+	}
+
+	loadedSeen, err := ReadSeenInstructions(seenPath, 2)
+	if err != nil {
+		t.Fatalf("read seen instructions: %v", err)
+	}
+	if len(loadedSeen) != 2 || loadedSeen[0] != "tail-511" || loadedSeen[1] != "tail-512" {
+		t.Fatalf("loaded seen tail = %#v", loadedSeen)
 	}
 }

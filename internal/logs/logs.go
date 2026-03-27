@@ -48,15 +48,31 @@ func AppendSummary(path string, entry SummaryEntry) (err error) {
 }
 
 func ReadRecentSummaries(path string, limit int) (entries []SummaryEntry, err error) {
-	entries, _, err = ReadRecentSummariesDetailed(path, limit)
-	return entries, err
+	if limit <= 0 {
+		return nil, nil
+	}
+	lines, err := readRecentLogLines(path, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var entry SummaryEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 
 func ReadRecentSummariesDetailed(path string, limit int) (entries []SummaryEntry, malformed int, err error) {
 	if limit <= 0 {
 		return nil, 0, nil
 	}
-	lines, err := readLogLines(path)
+	lines, err := readAllLogLines(path)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -102,7 +118,7 @@ func ReadSeenInstructions(path string, limit int) (values []string, err error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	lines, err := readLogLines(path)
+	lines, err := readRecentLogLines(path, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +135,65 @@ func ReadSeenInstructions(path string, limit int) (values []string, err error) {
 	return values[len(values)-limit:], nil
 }
 
-func readLogLines(path string) ([]string, error) {
+func readRecentLogLines(path string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() == 0 {
+		return nil, nil
+	}
+
+	const blockSize = 32 * 1024
+	lines := make([]string, 0, limit)
+	fragment := make([]byte, 0, blockSize)
+	offset := info.Size()
+	for offset > 0 && len(lines) < limit {
+		size := int64(blockSize)
+		if offset < size {
+			size = offset
+		}
+		offset -= size
+
+		buf := make([]byte, size)
+		if _, err := f.ReadAt(buf, offset); err != nil {
+			return nil, err
+		}
+		for i := len(buf) - 1; i >= 0; i-- {
+			if buf[i] == '\n' {
+				if len(fragment) > 0 {
+					lines = append(lines, reverseFragment(fragment))
+					fragment = fragment[:0]
+				}
+				continue
+			}
+			fragment = append(fragment, buf[i])
+		}
+	}
+	if len(fragment) > 0 && len(lines) < limit {
+		lines = append(lines, reverseFragment(fragment))
+	}
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	return lines, nil
+}
+
+func readAllLogLines(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -146,4 +220,12 @@ func readLogLines(path string) ([]string, error) {
 		}
 	}
 	return lines, nil
+}
+
+func reverseFragment(fragment []byte) string {
+	buf := make([]byte, len(fragment))
+	for i := range fragment {
+		buf[i] = fragment[len(fragment)-1-i]
+	}
+	return string(buf)
 }
