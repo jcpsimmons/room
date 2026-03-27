@@ -183,6 +183,9 @@ function LinkChip({
 export default function HomePage() {
   return (
     <main className="page-shell">
+      <a className="skip-link" href="#signal">
+        Skip to signal path
+      </a>
       <header className="masthead">
         <div className="masthead__brand">
           <span className="masthead__badge">ROOM</span>

@@ -39,3 +39,34 @@ test("renders the ROOM marketing page", async ({ page }) => {
     "https://open.spotify.com/embed/album/1dedNPacu6iCzgAblljBCr?utm_source=generator",
   );
 });
+
+test("honors reduced motion and exposes a skip link", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("link", { name: /skip to signal path/i }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /skip to signal path/i }),
+  ).toHaveAttribute("href", "#signal");
+
+  await expect(page.locator(".ticker__rail")).toHaveCSS(
+    "animation-name",
+    "none",
+  );
+  await expect(page.locator(".scope-display__orbit--outer")).toHaveCSS(
+    "animation-name",
+    "none",
+  );
+  await expect(page.locator(".meter-bank__bar").first()).toHaveCSS(
+    "animation-name",
+    "none",
+  );
+
+  const counter = page.locator(".scope-display__core strong");
+  await expect(counter).toHaveText("0000");
+  await page.waitForTimeout(750);
+  await expect(counter).toHaveText("0000");
+});
