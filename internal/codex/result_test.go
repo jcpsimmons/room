@@ -25,3 +25,11 @@ func TestParseResultRejectsMalformedJSON(t *testing.T) {
 		t.Fatalf("expected validation error")
 	}
 }
+
+func TestParseResultRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	if _, err := ParseResult([]byte(`{"summary":"added tests","next_instruction":"improve diagnostics","status":"continue","commit_message":"add tests","noise":"extra"}`)); err == nil {
+		t.Fatalf("expected unknown field error")
+	}
+}

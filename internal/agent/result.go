@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -27,7 +29,15 @@ type Execution struct {
 
 func ParseResult(raw []byte) (Result, error) {
 	var result Result
-	if err := json.Unmarshal(raw, &result); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		return Result{}, fmt.Errorf("%w: %v", errMalformedJSON, err)
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return Result{}, fmt.Errorf("%w: unexpected trailing data", errMalformedJSON)
+		}
 		return Result{}, fmt.Errorf("%w: %v", errMalformedJSON, err)
 	}
 	if err := result.Validate(); err != nil {
