@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/claude"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/git"
@@ -600,6 +601,49 @@ func TestRunStopsAfterFailureThreshold(t *testing.T) {
 	}
 	if report.Failures != 1 {
 		t.Fatalf("failures = %d", report.Failures)
+	}
+}
+
+func TestRunSurfacesClaudeWrapperDrift(t *testing.T) {
+	repoRoot := t.TempDir()
+	cfg, paths := prepareInitializedRepo(t, repoRoot)
+	cfg.Agent.Provider = "claude"
+	cfg.Claude.PermissionMode = "bypassPermissions"
+	if err := config.Save(paths.ConfigPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	runner := &fakeRunner{
+		version: "1.0.79",
+		runs: []fakeRun{{
+			err: errors.Join(errors.New("claude wrapper drift detected"), claude.ErrMalformedOutputEnvelope),
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:     repoRoot,
+		dirtySeq: []bool{false, false},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(nil, runner),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir:  repoRoot,
+		Iterations:  1,
+		MaxFailures: 1,
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "Wrapper drift detected: Claude output envelope was malformed.") {
+		t.Fatalf("run output missing wrapper drift note:\n%s", joined)
+	}
+	if !strings.Contains(joined, "claude wrapper drift detected") {
+		t.Fatalf("run output missing wrapper drift failure text:\n%s", joined)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
+	"github.com/jcpsimmons/room/internal/claude"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/git"
@@ -377,6 +378,9 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				FinishedAt:          finishedAt.UTC(),
 				Duration:            finishedAt.Sub(startedAt),
 			})
+			if note := runFailureNote(runErr); note != "" {
+				lines = append(lines, note)
+			}
 			lines = append(lines, fmt.Sprintf("Iteration %d failed: %v", nextIteration, runErr))
 			unsafe, unsafeErr := s.git.IsDirty(ctx, repoRoot)
 			if unsafeErr == nil && unsafe {
@@ -594,4 +598,11 @@ func indent(value string) string {
 		return "  "
 	}
 	return "  " + strings.ReplaceAll(value, "\n", "\n  ")
+}
+
+func runFailureNote(err error) string {
+	if errors.Is(err, claude.ErrMalformedOutputEnvelope) {
+		return "Wrapper drift detected: Claude output envelope was malformed."
+	}
+	return ""
 }

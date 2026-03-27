@@ -11,6 +11,8 @@ import (
 	"github.com/jcpsimmons/room/internal/agent"
 )
 
+var ErrMalformedOutputEnvelope = errors.New("malformed claude output envelope")
+
 type outputEnvelope struct {
 	IsError          bool            `json:"is_error"`
 	Result           string          `json:"result"`
@@ -43,13 +45,17 @@ func parseOutputEnvelope(raw []byte) (outputEnvelope, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
-		return outputEnvelope{}, fmt.Errorf("malformed claude output envelope: %w", err)
+		return outputEnvelope{}, malformedOutputEnvelopeError(err)
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err == nil {
-			return outputEnvelope{}, fmt.Errorf("malformed claude output envelope: unexpected trailing data")
+			return outputEnvelope{}, fmt.Errorf("%w: unexpected trailing data", ErrMalformedOutputEnvelope)
 		}
-		return outputEnvelope{}, fmt.Errorf("malformed claude output envelope: %w", err)
+		return outputEnvelope{}, malformedOutputEnvelopeError(err)
 	}
 	return envelope, nil
+}
+
+func malformedOutputEnvelopeError(err error) error {
+	return fmt.Errorf("%w: %v", ErrMalformedOutputEnvelope, err)
 }

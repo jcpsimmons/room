@@ -98,6 +98,9 @@ func (CLI) Run(ctx context.Context, prompt agent.Prompt, schema agent.Schema, op
 func captureResult(stdout []byte, outputPath string, execution *agent.Execution) error {
 	result, err := ParseOutput(stdout)
 	if err != nil {
+		if errors.Is(err, ErrMalformedOutputEnvelope) {
+			return fmt.Errorf("claude wrapper drift detected: %w", err)
+		}
 		return err
 	}
 	execution.Result = result

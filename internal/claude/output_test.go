@@ -1,6 +1,9 @@
 package claude
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseOutputUsesStructuredOutput(t *testing.T) {
 	t.Parallel()
@@ -35,7 +38,11 @@ func TestParseOutputRejectsEnvelopeDrift(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{"is_error":false,"structured_output":{"summary":"added tests","next_instruction":"improve diagnostics","status":"continue","commit_message":"add tests"},"noise":"extra"}`)
-	if _, err := ParseOutput(raw); err == nil {
+	_, err := ParseOutput(raw)
+	if err == nil {
 		t.Fatalf("expected envelope error")
+	}
+	if !errors.Is(err, ErrMalformedOutputEnvelope) {
+		t.Fatalf("expected malformed envelope sentinel, got %v", err)
 	}
 }

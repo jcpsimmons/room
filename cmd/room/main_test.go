@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/jcpsimmons/room/internal/app"
+	"github.com/jcpsimmons/room/internal/claude"
 	"github.com/jcpsimmons/room/internal/ui"
 )
 
@@ -49,6 +51,18 @@ func TestFormatRunProgress(t *testing.T) {
 			Err:       errTestBoom,
 		})
 		want := []string{"Iteration 4 failed: boom"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("formatRunProgress() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("wrapper drift failure", func(t *testing.T) {
+		got := formatRunProgress(app.RunProgressEvent{
+			Phase:     app.RunProgressPhaseIterationFailure,
+			Iteration: 7,
+			Err:       errors.Join(errors.New("claude wrapper drift detected"), claude.ErrMalformedOutputEnvelope),
+		})
+		want := []string{"Iteration 7 failed: Claude wrapper drift detected; malformed output envelope."}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("formatRunProgress() = %#v, want %#v", got, want)
 		}

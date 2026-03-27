@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/app"
+	"github.com/jcpsimmons/room/internal/claude"
 	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/ui"
 	"github.com/jcpsimmons/room/internal/version"
@@ -343,9 +344,15 @@ func formatRunProgress(event app.RunProgressEvent) []string {
 		}
 		return []string{fmt.Sprintf("Iteration %d [%s]: %s", event.Iteration, event.Status, detail)}
 	case app.RunProgressPhaseIterationFailure:
+		if errors.Is(event.Err, claude.ErrMalformedOutputEnvelope) {
+			return []string{fmt.Sprintf("Iteration %d failed: Claude wrapper drift detected; malformed output envelope.", event.Iteration)}
+		}
 		return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, errorText(event.Err, "agent execution failed"))}
 	case app.RunProgressPhaseRunFinish:
 		if event.Err != nil {
+			if errors.Is(event.Err, claude.ErrMalformedOutputEnvelope) {
+				return []string{"Run halted: Claude wrapper drift detected."}
+			}
 			return []string{fmt.Sprintf("Run halted: %s", event.Err.Error())}
 		}
 		if event.Status == "done" {
