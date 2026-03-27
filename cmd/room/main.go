@@ -55,6 +55,7 @@ func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *c
 	root.AddCommand(newDoctorCommand(ctx, svc))
 	root.AddCommand(newInspectCommand(ctx, svc))
 	root.AddCommand(newConfigCommand(ctx, svc))
+	root.AddCommand(newConfigCheckCommand(ctx, svc))
 	root.AddCommand(newBundleCommand(ctx, svc))
 	root.AddCommand(newTailCommand(ctx, svc))
 	root.AddCommand(newPruneCommand(ctx, svc))
@@ -217,6 +218,31 @@ func newConfigCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 		Short: "Show the resolved ROOM configuration",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			report, err := svc.Config(ctx, app.ConfigOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+			})
+			if asJSON {
+				return printJSON(report, err)
+			}
+			if err != nil {
+				return err
+			}
+			return renderLines(report.Lines)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	return cmd
+}
+
+func newConfigCheckCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "config-check",
+		Short: "Validate the ROOM config before starting a run",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.ConfigCheck(ctx, app.ConfigCheckOptions{
 				WorkingDir: mustWD(),
 				ConfigPath: configPath,
 			})

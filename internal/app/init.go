@@ -87,6 +87,7 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		fmt.Sprintf("State directory: %s", paths.RoomDir),
 		"Next steps:",
 		"  room doctor",
+		"  room config-check",
 		"  room inspect",
 		"  room run --iterations 5",
 	}

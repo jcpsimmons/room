@@ -98,6 +98,7 @@ curl -fsSL https://raw.githubusercontent.com/jcpsimmons/room/main/scripts/instal
 
 ```bash
 room init
+room config-check
 room doctor
 room inspect
 room bundle
@@ -176,6 +177,10 @@ Prints the exact prompt body ROOM would send next.
 ### `room config`
 
 Prints the resolved ROOM configuration, including the effective provider settings and the paths ROOM will use for its state files.
+
+### `room config-check`
+
+Validates `.room/config.toml` with the strict parser before a run starts. Use `--config` to point at an alternate config file, or `--json` for machine-readable output.
 
 ### `room tail`
 
