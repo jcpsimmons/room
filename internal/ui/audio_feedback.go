@@ -1,0 +1,85 @@
+package ui
+
+import (
+	"math"
+
+	"github.com/jcpsimmons/room/internal/audio"
+)
+
+// audioCue carries a short-lived tone that rides on top of the ambient voices.
+// It lets outcome events punch through with a distinct timbre before fading
+// back into the flux bed.
+type audioCue struct {
+	recipe audio.Params
+	energy float64
+}
+
+func (c *audioCue) trigger(ev ProgressEvent) {
+	recipe, ok := outcomeToneRecipe(ev)
+	if !ok {
+		return
+	}
+	c.recipe = recipe
+	c.energy = 1
+}
+
+func (c *audioCue) step(dt float64) {
+	if c.energy <= 0 {
+		return
+	}
+	c.energy *= math.Exp(-dt * 3.5)
+	if c.energy < 0.001 {
+		c.energy = 0
+	}
+}
+
+func (c audioCue) audioParams(fallback audio.Params) audio.Params {
+	if c.energy <= 0 {
+		return fallback
+	}
+
+	out := c.recipe
+	out.Amp = fallback.Amp + out.Amp*c.energy
+	out.ModDepth *= 0.6 + 0.4*c.energy
+	out.Detune += (1 - c.energy) * 0.25
+	return out
+}
+
+func outcomeToneRecipe(ev ProgressEvent) (audio.Params, bool) {
+	switch {
+	case ev.Kind == ProgressFailure:
+		return audio.Params{
+			Freq:     82.41,
+			Amp:      0.24,
+			ModFreq:  164.82,
+			ModDepth: 5.5,
+			Detune:   0.12,
+		}, true
+	case ev.Kind == ProgressPivot || ev.Status == "pivot":
+		return audio.Params{
+			Freq:     196.0,
+			Amp:      0.18,
+			ModFreq:  294.0,
+			ModDepth: 1.35,
+			Detune:   2.2,
+		}, true
+	case ev.Kind == ProgressDone || ev.Status == "done":
+		return audio.Params{
+			Freq:     784.0,
+			Amp:      0.2,
+			ModFreq:  1176.0,
+			ModDepth: 0.32,
+			Detune:   4.5,
+		}, true
+	case ev.Kind == ProgressComplete:
+		return audio.Params{
+			Freq:     261.63,
+			Amp:      0.16,
+			ModFreq:  523.25,
+			ModDepth: 0.9,
+			Detune:   1.0,
+		}, true
+	default:
+		return audio.Params{}, false
+	}
+}

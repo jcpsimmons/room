@@ -127,7 +127,8 @@ type RunModel struct {
 	flux      fluxTopology
 
 	// Audio synthesis.
-	synth *audio.Synth
+	synth      *audio.Synth
+	outcomeCue audioCue
 
 	lastFrame time.Time
 	started   time.Time
@@ -397,6 +398,9 @@ func (m RunModel) consume(ev ProgressEvent) RunModel {
 	if ev.DryRun {
 		m.dryRun = true
 	}
+	if _, ok := outcomeToneRecipe(ev); ok {
+		m.outcomeCue.trigger(ev)
+	}
 	m.events = append(m.events, ev)
 	if len(m.events) > 10 {
 		m.events = append([]ProgressEvent(nil), m.events[len(m.events)-10:]...)
@@ -426,6 +430,7 @@ func (m RunModel) stepFrame(now time.Time) RunModel {
 	}
 	m.lastFrame = now
 	m.phase += dt * 2.8
+	m.outcomeCue.step(dt)
 
 	targetX, targetY := m.targetPoint()
 	prevX, prevY := m.orbX, m.orbY
@@ -485,13 +490,14 @@ func (m RunModel) stepFrame(now time.Time) RunModel {
 		modFreq := freq * 1.5
 		// Slight detune for beating.
 		detune := 0.5 + math.Sin(m.phase*0.3)*0.3
-		m.synth.UpdateVoice(0, audio.Params{
+		base := audio.Params{
 			Freq:     freq,
 			Amp:      amp,
 			ModFreq:  modFreq,
 			ModDepth: modDepth,
 			Detune:   detune,
-		})
+		}
+		m.synth.UpdateVoice(0, m.outcomeCue.audioParams(base))
 
 		// Voice 1: Decay chamber — sub-bass rumble + decay pings.
 		m.synth.UpdateVoice(1, m.decay.audioParams())
