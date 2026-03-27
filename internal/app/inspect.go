@@ -20,6 +20,7 @@ type InspectOptions struct {
 type InspectReport struct {
 	RepoRoot           string              `json:"repo_root"`
 	Prompt             string              `json:"prompt"`
+	PromptStats        prompt.BuildReport  `json:"prompt_stats"`
 	CurrentInstruction string              `json:"current_instruction"`
 	RecoveryHint       string              `json:"recovery_hint,omitempty"`
 	RecentSummaries    []logs.SummaryEntry `json:"recent_summaries,omitempty"`
@@ -75,7 +76,7 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 			recoveryHint = recoveryHint + "\n" + missingInstructionHint
 		}
 	}
-	promptText := prompt.Build(prompt.BuildInput{
+	promptText, promptStats := prompt.BuildDetailed(prompt.BuildInput{
 		CurrentInstruction: currentInstruction,
 		RecoveryHint:       recoveryHint,
 		RecentSummaries:    summaries,
@@ -88,6 +89,7 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 	return InspectReport{
 		RepoRoot:           repoRoot,
 		Prompt:             promptText,
+		PromptStats:        promptStats,
 		CurrentInstruction: currentInstruction,
 		RecoveryHint:       recoveryHint,
 		RecentSummaries:    summaries,

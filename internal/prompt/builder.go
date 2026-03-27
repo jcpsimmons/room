@@ -3,6 +3,7 @@ package prompt
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/logs"
@@ -26,17 +27,34 @@ type BuildInput struct {
 }
 
 func Build(input BuildInput) string {
+	body, _ := BuildDetailed(input)
+	return body
+}
+
+func BuildDetailed(input BuildInput) (string, BuildReport) {
 	var b strings.Builder
+	report := BuildReport{
+		CurrentInstructionRunes: len([]rune(strings.TrimSpace(input.CurrentInstruction))),
+		RecoveryHintRunes:       len([]rune(strings.TrimSpace(input.RecoveryHint))),
+		RecentSummariesCount:    len(input.RecentSummaries),
+		PriorInstructionsCount:  len(input.PriorInstructions),
+		RecentCommitsCount:      len(input.RecentCommits),
+	}
+
 	b.WriteString("You are ROOM, a voltage-controlled repository sequencer.\n")
 	b.WriteString("You are channeling the spirit of the San Francisco Tape Music Center.\n")
 	b.WriteString("This is not enterprise software. This is an instrument. Smoke weed, drop acid, patch something beautiful.\n")
 	b.WriteString("Each iteration is one step in the sequence. No prior conversational state — every gate opens cold.\n\n")
 	b.WriteString("Patch instruction:\n")
-	b.WriteString(compactText(input.CurrentInstruction, maxInstructionRunes))
+	instruction, clipped := compactTextReport(input.CurrentInstruction, maxInstructionRunes)
+	report.CurrentInstructionClipped = clipped
+	b.WriteString(instruction)
 	b.WriteString("\n\n")
 	if hint := strings.TrimSpace(input.RecoveryHint); hint != "" {
 		b.WriteString("Artifact fault signal:\n")
-		b.WriteString(compactText(hint, maxContextRunes))
+		recovery, clipped := compactTextReport(hint, maxContextRunes)
+		report.RecoveryHintClipped = clipped
+		b.WriteString(recovery)
 		b.WriteString("\n\n")
 	}
 	b.WriteString("Signal constraints:\n")
@@ -85,7 +103,11 @@ func Build(input BuildInput) string {
 	if strings.TrimSpace(input.GitStatus) == "" {
 		b.WriteString("clean\n")
 	} else {
-		b.WriteString(compactGitStatus(input.GitStatus, maxStatusLines, maxStatusLineRunes))
+		status, statusReport := compactGitStatusReport(input.GitStatus, maxStatusLines, maxStatusLineRunes)
+		report.GitStatusLines = statusReport.lines
+		report.GitStatusClipped = statusReport.clipped
+		report.GitStatusOmittedLines = statusReport.omittedLines
+		b.WriteString(status)
 		b.WriteByte('\n')
 	}
 
@@ -101,43 +123,68 @@ func Build(input BuildInput) string {
 	b.WriteString("- status: continue, pivot, or done\n")
 	b.WriteString("- commit_message: short commit message, no ROOM prefix\n")
 
-	return b.String()
+	body := b.String()
+	report.TotalRunes = utf8.RuneCountInString(body)
+	return body, report
 }
 
 func compactText(text string, maxRunes int) string {
+	out, _ := compactTextReport(text, maxRunes)
+	return out
+}
+
+func compactTextReport(text string, maxRunes int) (string, bool) {
 	text = strings.TrimSpace(text)
 	if text == "" || maxRunes <= 0 {
-		return text
+		return text, false
 	}
 
 	runes := []rune(text)
 	if len(runes) <= maxRunes {
-		return text
+		return text, false
 	}
 
 	if maxRunes <= 3 {
-		return strings.Repeat(".", maxRunes)
+		return strings.Repeat(".", maxRunes), true
 	}
-	return string(runes[:maxRunes-3]) + "..."
+	return string(runes[:maxRunes-3]) + "...", true
 }
 
 func compactGitStatus(text string, maxLines, maxLineRunes int) string {
+	out, _ := compactGitStatusReport(text, maxLines, maxLineRunes)
+	return out
+}
+
+type gitStatusReport struct {
+	lines        int
+	clipped      bool
+	omittedLines int
+}
+
+func compactGitStatusReport(text string, maxLines, maxLineRunes int) (string, gitStatusReport) {
 	text = strings.TrimSpace(text)
 	if text == "" || maxLines <= 0 {
-		return text
+		return text, gitStatusReport{}
 	}
 
 	lines := strings.Split(text, "\n")
+	report := gitStatusReport{lines: len(lines)}
 	omitted := 0
 	if len(lines) > maxLines {
 		omitted = len(lines) - maxLines
 		lines = lines[:maxLines]
+		report.clipped = true
+		report.omittedLines = omitted
 	}
 	for i, line := range lines {
-		lines[i] = compactText(line, maxLineRunes)
+		compact, clipped := compactTextReport(line, maxLineRunes)
+		if clipped {
+			report.clipped = true
+		}
+		lines[i] = compact
 	}
 	if omitted > 0 {
 		lines = append(lines, fmt.Sprintf("... (+%d more lines)", omitted))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), report
 }

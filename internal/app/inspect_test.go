@@ -121,3 +121,46 @@ func TestInspectSurvivesMissingInstructionFile(t *testing.T) {
 		t.Fatalf("git status = %q", report.GitStatus)
 	}
 }
+
+func TestInspectReportsPromptStats(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	longInstruction := strings.Repeat("patch the oscillator path ", 80)
+	if err := os.WriteFile(paths.InstructionPath, []byte(longInstruction+"\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	if err := logs.AppendSeenInstruction(paths.SeenInstructionsPath, "Hold the drift"); err != nil {
+		t.Fatalf("append seen instruction: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:          repoRoot,
+			statusShort:   strings.Join([]string{" M a.txt", "?? b.txt", "?? c.txt", "?? d.txt", "?? e.txt", "?? f.txt", "?? g.txt", "?? h.txt", "?? i.txt", "?? j.txt", "?? k.txt", "?? l.txt", "?? m.txt"}, "\n"),
+			recentCommits: []git.Commit{{Hash: "abc123", Subject: "close the loop"}},
+		},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Inspect(context.Background(), InspectOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+
+	if report.PromptStats.TotalRunes == 0 {
+		t.Fatal("expected total runes to be recorded")
+	}
+	if !report.PromptStats.CurrentInstructionClipped {
+		t.Fatal("expected current instruction to be marked clipped")
+	}
+	if !report.PromptStats.GitStatusClipped {
+		t.Fatal("expected git status to be marked clipped")
+	}
+	if report.PromptStats.GitStatusOmittedLines != 1 {
+		t.Fatalf("git status omitted lines = %d", report.PromptStats.GitStatusOmittedLines)
+	}
+	if report.PromptStats.RecentCommitsCount != 1 {
+		t.Fatalf("recent commits count = %d", report.PromptStats.RecentCommitsCount)
+	}
+}
