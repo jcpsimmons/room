@@ -45,17 +45,43 @@ func parseOutputEnvelope(raw []byte) (outputEnvelope, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
-		return outputEnvelope{}, malformedOutputEnvelopeError(err)
+		return outputEnvelope{}, malformedOutputEnvelopeError(raw, err)
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err == nil {
-			return outputEnvelope{}, fmt.Errorf("%w: unexpected trailing data", ErrMalformedOutputEnvelope)
+			return outputEnvelope{}, malformedOutputEnvelopeError(raw, errors.New("unexpected trailing data"))
 		}
-		return outputEnvelope{}, malformedOutputEnvelopeError(err)
+		return outputEnvelope{}, malformedOutputEnvelopeError(raw, err)
 	}
 	return envelope, nil
 }
 
-func malformedOutputEnvelopeError(err error) error {
-	return fmt.Errorf("%w: %v", ErrMalformedOutputEnvelope, err)
+func malformedOutputEnvelopeError(raw []byte, err error) error {
+	return fmt.Errorf("%w: %v (input %q)", ErrMalformedOutputEnvelope, err, previewOutputJSON(raw))
+}
+
+func previewOutputJSON(raw []byte) string {
+	const limit = 160
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	buf := make([]byte, 0, len(trimmed))
+	for _, b := range trimmed {
+		switch b {
+		case '\n', '\r', '\t':
+			b = ' '
+		}
+		if b < 0x20 {
+			b = ' '
+		}
+		buf = append(buf, b)
+		if len(buf) >= limit {
+			break
+		}
+	}
+	if len(trimmed) > len(buf) {
+		return string(buf) + "..."
+	}
+	return string(buf)
 }

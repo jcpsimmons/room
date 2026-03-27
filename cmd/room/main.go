@@ -468,13 +468,13 @@ func formatRunProgress(event app.RunProgressEvent) []string {
 		return []string{fmt.Sprintf("Iteration %d [%s]: %s", event.Iteration, event.Status, detail)}
 	case app.RunProgressPhaseIterationFailure:
 		if errors.Is(event.Err, claude.ErrMalformedOutputEnvelope) {
-			return []string{fmt.Sprintf("Iteration %d failed: Claude wrapper drift detected; malformed output envelope.", event.Iteration)}
+			return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, errorText(event.Err, "Claude wrapper drift detected"))}
 		}
 		return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, errorText(event.Err, "agent execution failed"))}
 	case app.RunProgressPhaseRunFinish:
 		if event.Err != nil {
 			if errors.Is(event.Err, claude.ErrMalformedOutputEnvelope) {
-				return []string{"Run halted: Claude wrapper drift detected."}
+				return []string{fmt.Sprintf("Run halted: %s", errorText(event.Err, "Claude wrapper drift detected"))}
 			}
 			return []string{fmt.Sprintf("Run halted: %s", event.Err.Error())}
 		}

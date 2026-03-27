@@ -2,6 +2,7 @@ package claude
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -44,5 +45,21 @@ func TestParseOutputRejectsEnvelopeDrift(t *testing.T) {
 	}
 	if !errors.Is(err, ErrMalformedOutputEnvelope) {
 		t.Fatalf("expected malformed envelope sentinel, got %v", err)
+	}
+}
+
+func TestParseOutputIncludesInputPreviewOnMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("{\n  \"is_error\": false,\n  \"structured_output\": {\"summary\": \"added tests\"}\n")
+	_, err := ParseOutput(raw)
+	if err == nil {
+		t.Fatal("expected malformed envelope error")
+	}
+	if !errors.Is(err, ErrMalformedOutputEnvelope) {
+		t.Fatalf("expected malformed envelope sentinel, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "is_error") || !strings.Contains(err.Error(), "summary") {
+		t.Fatalf("expected input preview in error, got %v", err)
 	}
 }

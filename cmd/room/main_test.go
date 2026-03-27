@@ -65,7 +65,7 @@ func TestFormatRunProgress(t *testing.T) {
 			Iteration: 7,
 			Err:       errors.Join(errors.New("claude wrapper drift detected"), claude.ErrMalformedOutputEnvelope),
 		})
-		want := []string{"Iteration 7 failed: Claude wrapper drift detected; malformed output envelope."}
+		want := []string{"Iteration 7 failed: claude wrapper drift detected\nmalformed claude output envelope"}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("formatRunProgress() = %#v, want %#v", got, want)
 		}
