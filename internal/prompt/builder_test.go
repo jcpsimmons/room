@@ -14,6 +14,7 @@ func TestBuildIncludesRelevantContext(t *testing.T) {
 
 	body := Build(BuildInput{
 		CurrentInstruction: "Harden the config loader",
+		RecoveryHint:       "Hint: newest bundle 0002 is incomplete; missing result.json and diff.patch.",
 		RecentSummaries: []logs.SummaryEntry{{
 			Iteration: 3,
 			Timestamp: time.Now(),
@@ -34,6 +35,8 @@ func TestBuildIncludesRelevantContext(t *testing.T) {
 		"Added config parsing tests",
 		"Improve config validation",
 		"room: tighten config errors",
+		"Artifact fault signal",
+		"missing result.json and diff.patch",
 		"M internal/config/config.go",
 		"No repeated patch notes",
 		"fully patched and humming",

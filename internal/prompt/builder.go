@@ -10,6 +10,7 @@ import (
 
 type BuildInput struct {
 	CurrentInstruction string
+	RecoveryHint       string
 	RecentSummaries    []logs.SummaryEntry
 	PriorInstructions  []string
 	RecentCommits      []git.Commit
@@ -26,6 +27,11 @@ func Build(input BuildInput) string {
 	b.WriteString("Patch instruction:\n")
 	b.WriteString(strings.TrimSpace(input.CurrentInstruction))
 	b.WriteString("\n\n")
+	if hint := strings.TrimSpace(input.RecoveryHint); hint != "" {
+		b.WriteString("Artifact fault signal:\n")
+		b.WriteString(hint)
+		b.WriteString("\n\n")
+	}
 	b.WriteString("Signal constraints:\n")
 	b.WriteString("- One patch per step. Make it count.\n")
 	b.WriteString("- Solder the connection — don't just draw the schematic.\n")

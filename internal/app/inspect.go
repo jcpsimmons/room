@@ -39,6 +39,10 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 	if err != nil {
 		return InspectReport{}, err
 	}
+	_, bundleHint, err := newestBundleHint(paths.RunsDir)
+	if err != nil {
+		return InspectReport{}, err
+	}
 	commits, err := s.git.RecentCommits(ctx, repoRoot, 10)
 	if err != nil {
 		return InspectReport{}, err
@@ -55,6 +59,7 @@ func (s *Service) Inspect(ctx context.Context, opts InspectOptions) (InspectRepo
 	return InspectReport{
 		Prompt: prompt.Build(prompt.BuildInput{
 			CurrentInstruction: currentInstruction,
+			RecoveryHint:       bundleHint,
 			RecentSummaries:    summaries,
 			PriorInstructions:  priorInstructions,
 			RecentCommits:      commits,
