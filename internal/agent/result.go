@@ -28,8 +28,17 @@ type Execution struct {
 }
 
 func ParseResult(raw []byte) (Result, error) {
+	payload := bytes.TrimSpace(raw)
+	if len(payload) > 0 && payload[0] != '{' {
+		extracted, err := extractJSONObject(payload)
+		if err != nil {
+			return Result{}, malformedResultError(raw, err)
+		}
+		payload = extracted
+	}
+
 	var result Result
-	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&result); err != nil {
 		return Result{}, malformedResultError(raw, err)

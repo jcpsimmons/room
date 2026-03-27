@@ -61,6 +61,19 @@ func TestParseOutputIgnoresWrapperNoiseAroundEnvelope(t *testing.T) {
 	}
 }
 
+func TestParseOutputIgnoresMarkdownWrappedEnvelope(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("```json\n{\"is_error\":false,\"structured_output\":{\"summary\":\"added tests\",\"next_instruction\":\"improve diagnostics\",\"status\":\"continue\",\"commit_message\":\"add tests\"}}\n```")
+	result, err := ParseOutput(raw)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if result.Summary != "added tests" {
+		t.Fatalf("summary = %q", result.Summary)
+	}
+}
+
 func TestParseOutputIgnoresLeadingAndTrailingTextAroundErrorEnvelope(t *testing.T) {
 	t.Parallel()
 

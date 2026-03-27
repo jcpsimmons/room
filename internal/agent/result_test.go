@@ -21,3 +21,32 @@ func TestParseResultIncludesInputPreviewOnMalformedJSON(t *testing.T) {
 		t.Fatalf("expected input preview in error, got %v", err)
 	}
 }
+
+func TestParseResultExtractsJSONObjectFromWrapperNoise(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("operator drift detected\n```json\n{\"summary\":\"ok\",\"next_instruction\":\"swing wider\",\"status\":\"continue\",\"commit_message\":\"swing wider\"}\n```\n")
+	result, err := ParseResult(raw)
+	if err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+	if result.NextInstruction != "swing wider" {
+		t.Fatalf("next_instruction = %q", result.NextInstruction)
+	}
+}
+
+func TestParseResultRejectsWrapperNoiseWithoutCompleteJSONObject(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("```json\n{\"summary\":\"ok\",\"next_instruction\":\"swing wider\"\n```")
+	_, err := ParseResult(raw)
+	if err == nil {
+		t.Fatal("expected malformed JSON error")
+	}
+	if !errors.Is(err, errMalformedJSON) {
+		t.Fatalf("expected malformed JSON sentinel, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "complete JSON object") {
+		t.Fatalf("expected extraction failure in error, got %v", err)
+	}
+}
