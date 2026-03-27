@@ -146,3 +146,25 @@ permission_mode = "acceptEdits"
 		t.Fatalf("expected claude permission mode validation error")
 	}
 }
+
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	input := []byte(`
+[agent]
+provider = "codex"
+
+[run]
+default_iterations = 12
+unexpected_toggle = true
+`)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected unknown key validation error")
+	}
+}
