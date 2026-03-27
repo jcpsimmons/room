@@ -56,6 +56,7 @@ func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *c
 	root.AddCommand(newInspectCommand(ctx, svc))
 	root.AddCommand(newConfigCommand(ctx, svc))
 	root.AddCommand(newTailCommand(ctx, svc))
+	root.AddCommand(newPruneCommand(ctx, svc))
 	root.AddCommand(newVersionCommand(info))
 
 	return root
@@ -245,6 +246,37 @@ func newTailCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	return cmd
+}
+
+func newPruneCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var keep int
+	var dryRun bool
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove older ROOM run bundles",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Prune(ctx, app.PruneOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+				Keep:       keep,
+				DryRun:     dryRun,
+			})
+			if asJSON {
+				return printJSON(report, err)
+			}
+			if err != nil {
+				return err
+			}
+			return renderLines(report.Lines)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().IntVar(&keep, "keep", 10, "number of newest run bundles to keep")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be deleted without removing anything")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
 	return cmd
 }
 

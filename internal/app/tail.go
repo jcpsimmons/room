@@ -97,20 +97,32 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 }
 
 func latestRunBundle(runsDir string) (string, error) {
+	bundles, err := runBundles(runsDir)
+	if err != nil {
+		return "", err
+	}
+	if len(bundles) == 0 {
+		return "", fmt.Errorf("no ROOM run bundles found in %s", runsDir)
+	}
+	return bundles[0].path, nil
+}
+
+type runBundle struct {
+	name string
+	seq  int
+	path string
+}
+
+func runBundles(runsDir string) ([]runBundle, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("no ROOM run bundles found in %s", runsDir)
+			return nil, nil
 		}
-		return "", err
+		return nil, err
 	}
 
-	type runEntry struct {
-		name string
-		seq  int
-	}
-
-	var runs []runEntry
+	var runs []runBundle
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -119,19 +131,15 @@ func latestRunBundle(runsDir string) (string, error) {
 		if err != nil {
 			continue
 		}
-		runs = append(runs, runEntry{name: entry.Name(), seq: seq})
+		runs = append(runs, runBundle{name: entry.Name(), seq: seq, path: filepath.Join(runsDir, entry.Name())})
 	}
-	if len(runs) == 0 {
-		return "", fmt.Errorf("no ROOM run bundles found in %s", runsDir)
-	}
-
 	sort.Slice(runs, func(i, j int) bool {
 		if runs[i].seq == runs[j].seq {
 			return runs[i].name > runs[j].name
 		}
 		return runs[i].seq > runs[j].seq
 	})
-	return filepath.Join(runsDir, runs[0].name), nil
+	return runs, nil
 }
 
 func readTailResult(path string) (*agent.Result, bool, error) {

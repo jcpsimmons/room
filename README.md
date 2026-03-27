@@ -180,6 +180,10 @@ Prints the resolved ROOM configuration, including the effective provider setting
 
 Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured result, and diff stats without making you open the artifact directory by hand.
 
+### `room prune`
+
+Deletes older `.room/runs/<n>/` bundles so the tape archive does not grow without bound. Use `--keep N` to choose how many newest bundles to retain, and `--dry-run` to preview the cut.
+
 ### `room status`
 
 Shows repo path, iteration count, current instruction, last summaries, recent ROOM commits, and dirty state.
