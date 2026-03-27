@@ -8,6 +8,13 @@ import (
 	"github.com/jcpsimmons/room/internal/logs"
 )
 
+const (
+	maxInstructionRunes = 1200
+	maxContextRunes     = 220
+	maxStatusLines      = 12
+	maxStatusLineRunes  = 140
+)
+
 type BuildInput struct {
 	CurrentInstruction string
 	RecoveryHint       string
@@ -25,11 +32,11 @@ func Build(input BuildInput) string {
 	b.WriteString("This is not enterprise software. This is an instrument. Smoke weed, drop acid, patch something beautiful.\n")
 	b.WriteString("Each iteration is one step in the sequence. No prior conversational state — every gate opens cold.\n\n")
 	b.WriteString("Patch instruction:\n")
-	b.WriteString(strings.TrimSpace(input.CurrentInstruction))
+	b.WriteString(compactText(input.CurrentInstruction, maxInstructionRunes))
 	b.WriteString("\n\n")
 	if hint := strings.TrimSpace(input.RecoveryHint); hint != "" {
 		b.WriteString("Artifact fault signal:\n")
-		b.WriteString(hint)
+		b.WriteString(compactText(hint, maxContextRunes))
 		b.WriteString("\n\n")
 	}
 	b.WriteString("Signal constraints:\n")
@@ -53,7 +60,7 @@ func Build(input BuildInput) string {
 		b.WriteString("- none\n")
 	} else {
 		for _, summary := range input.RecentSummaries {
-			fmt.Fprintf(&b, "- #%d [%s] %s\n", summary.Iteration, summary.Status, summary.Summary)
+			fmt.Fprintf(&b, "- #%d [%s] %s\n", summary.Iteration, summary.Status, compactText(summary.Summary, maxContextRunes))
 		}
 	}
 	b.WriteString("\nPrior patch notes:\n")
@@ -62,7 +69,7 @@ func Build(input BuildInput) string {
 	} else {
 		for _, instruction := range input.PriorInstructions {
 			b.WriteString("- ")
-			b.WriteString(instruction)
+			b.WriteString(compactText(instruction, maxContextRunes))
 			b.WriteByte('\n')
 		}
 	}
@@ -71,14 +78,14 @@ func Build(input BuildInput) string {
 		b.WriteString("- none\n")
 	} else {
 		for _, commit := range input.RecentCommits {
-			fmt.Fprintf(&b, "- %s %s\n", commit.Hash, commit.Subject)
+			fmt.Fprintf(&b, "- %s %s\n", commit.Hash, compactText(commit.Subject, maxContextRunes))
 		}
 	}
 	b.WriteString("\nPatch bay state:\n")
 	if strings.TrimSpace(input.GitStatus) == "" {
 		b.WriteString("clean\n")
 	} else {
-		b.WriteString(input.GitStatus)
+		b.WriteString(compactGitStatus(input.GitStatus, maxStatusLines, maxStatusLineRunes))
 		b.WriteByte('\n')
 	}
 
@@ -95,4 +102,42 @@ func Build(input BuildInput) string {
 	b.WriteString("- commit_message: short commit message, no ROOM prefix\n")
 
 	return b.String()
+}
+
+func compactText(text string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || maxRunes <= 0 {
+		return text
+	}
+
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+
+	if maxRunes <= 3 {
+		return strings.Repeat(".", maxRunes)
+	}
+	return string(runes[:maxRunes-3]) + "..."
+}
+
+func compactGitStatus(text string, maxLines, maxLineRunes int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || maxLines <= 0 {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	omitted := 0
+	if len(lines) > maxLines {
+		omitted = len(lines) - maxLines
+		lines = lines[:maxLines]
+	}
+	for i, line := range lines {
+		lines[i] = compactText(line, maxLineRunes)
+	}
+	if omitted > 0 {
+		lines = append(lines, fmt.Sprintf("... (+%d more lines)", omitted))
+	}
+	return strings.Join(lines, "\n")
 }
