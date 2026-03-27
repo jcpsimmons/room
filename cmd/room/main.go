@@ -53,6 +53,7 @@ func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *c
 	root.AddCommand(newStatusCommand(ctx, svc))
 	root.AddCommand(newDoctorCommand(ctx, svc))
 	root.AddCommand(newInspectCommand(ctx, svc))
+	root.AddCommand(newTailCommand(ctx, svc))
 	root.AddCommand(newVersionCommand(info))
 
 	return root
@@ -197,6 +198,26 @@ func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
 	cmd.Flags().StringVar(&instructionFile, "instruction-file", "", "override the instruction file path")
+	return cmd
+}
+
+func newTailCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	cmd := &cobra.Command{
+		Use:   "tail",
+		Short: "Show the newest ROOM run bundle",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Tail(ctx, app.TailOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+			})
+			if err != nil {
+				return err
+			}
+			return renderLines(report.Lines)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
 	return cmd
 }
 

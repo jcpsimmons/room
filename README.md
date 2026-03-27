@@ -100,6 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/jcpsimmons/room/main/scripts/instal
 room init
 room doctor
 room inspect
+room tail
 room run --iterations 5
 room status
 ```
@@ -170,6 +171,10 @@ Each iteration:
 ### `room inspect`
 
 Prints the exact prompt body ROOM would send next.
+
+### `room tail`
+
+Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured result, and diff stats without making you open the artifact directory by hand.
 
 ### `room status`
 
@@ -247,9 +252,9 @@ When the loop stalls, ROOM rewrites the next instruction into a forced pivot ins
 
 If a run fails:
 
-- inspect `.room/runs/<n>/`
-- read `execution.json`, `stderr.log`, `stdout.log`, and `result.json`
-- inspect `diff.patch`
+- run `room tail`
+- inspect `.room/runs/<n>/` if you need the raw artifacts
+- read `execution.json`, `stderr.log`, `stdout.log`, and `result.json` when the bundle needs closer forensic work
 - run `room status`
 
 ROOM preserves raw artifacts so malformed JSON, timeouts, and git issues are diagnosable after the fact.
