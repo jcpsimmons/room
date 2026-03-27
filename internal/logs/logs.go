@@ -48,12 +48,17 @@ func AppendSummary(path string, entry SummaryEntry) (err error) {
 }
 
 func ReadRecentSummaries(path string, limit int) (entries []SummaryEntry, err error) {
+	entries, _, err = ReadRecentSummariesDetailed(path, limit)
+	return entries, err
+}
+
+func ReadRecentSummariesDetailed(path string, limit int) (entries []SummaryEntry, malformed int, err error) {
 	if limit <= 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	lines, err := readLogLines(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	for _, line := range lines {
@@ -62,14 +67,15 @@ func ReadRecentSummaries(path string, limit int) (entries []SummaryEntry, err er
 		}
 		var entry SummaryEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			malformed++
 			continue
 		}
 		entries = append(entries, entry)
 	}
 	if len(entries) <= limit {
-		return entries, nil
+		return entries, malformed, nil
 	}
-	return entries[len(entries)-limit:], nil
+	return entries[len(entries)-limit:], malformed, nil
 }
 
 func AppendSeenInstruction(path, instruction string) (err error) {

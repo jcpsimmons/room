@@ -49,6 +49,36 @@ func TestReadRecentSummariesHandlesOversizedLines(t *testing.T) {
 	}
 }
 
+func TestReadRecentSummariesReportsMalformedEntries(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summaries.log")
+
+	payload := strings.Join([]string{
+		`{"iteration":1,"timestamp":"2026-03-25T12:00:00Z","status":"continue","summary":"first"}`,
+		`{not-json`,
+		`{"iteration":2,"timestamp":"2026-03-25T12:05:00Z","status":"done","summary":"second"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write summaries: %v", err)
+	}
+
+	loaded, malformed, err := ReadRecentSummariesDetailed(path, 10)
+	if err != nil {
+		t.Fatalf("read recent summaries detailed: %v", err)
+	}
+	if malformed != 1 {
+		t.Fatalf("malformed entries = %d", malformed)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("loaded summaries = %#v", loaded)
+	}
+	if loaded[0].Iteration != 1 || loaded[1].Iteration != 2 {
+		t.Fatalf("loaded iterations = %#v", loaded)
+	}
+}
+
 func TestReadSeenInstructionsHandlesOversizedLines(t *testing.T) {
 	t.Parallel()
 

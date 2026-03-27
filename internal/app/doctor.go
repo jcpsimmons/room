@@ -13,6 +13,7 @@ import (
 	"github.com/jcpsimmons/room/internal/codex"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
+	"github.com/jcpsimmons/room/internal/logs"
 	"github.com/jcpsimmons/room/internal/state"
 )
 
@@ -151,6 +152,21 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		}
 	} else {
 		checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: "ROOM is not initialized yet; `room init` will create state files"})
+	}
+
+	recentSummaries, malformedSummaries, err := logs.ReadRecentSummariesDetailed(paths.SummariesPath, cfg.Prompt.MaxRecentSummaries)
+	if err != nil {
+		checks = append(checks, DoctorCheck{Name: "history", OK: false, Message: fmt.Sprintf("summary history read failed: %v", err)})
+	} else if malformedSummaries > 0 {
+		checks = append(checks, DoctorCheck{
+			Name:    "history",
+			OK:      false,
+			Message: fmt.Sprintf("summary history log has %d malformed entrie(s); ROOM will ignore them but prompt context is thinner", malformedSummaries),
+		})
+	} else if len(recentSummaries) == 0 {
+		checks = append(checks, DoctorCheck{Name: "history", OK: true, Message: "summary history log is empty"})
+	} else {
+		checks = append(checks, DoctorCheck{Name: "history", OK: true, Message: fmt.Sprintf("summary history log parsed %d entrie(s)", len(recentSummaries))})
 	}
 
 	assessment, err := assessNewestBundle(paths.RunsDir)

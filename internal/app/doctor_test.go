@@ -183,3 +183,45 @@ func TestDoctorReportsGitInfoExcludeProtection(t *testing.T) {
 		t.Fatalf("expected git_info_exclude check after writing exclude, got %#v", report.Checks)
 	}
 }
+
+func TestDoctorSurfacesMalformedSummaryHistory(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.SummariesPath, []byte("{not-json\n"), 0o644); err != nil {
+		t.Fatalf("write malformed summaries: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "history" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected malformed history to fail, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "malformed entrie(s)") {
+			t.Fatalf("unexpected history message: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected history check, got %#v", report.Checks)
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "summary history log has 1 malformed entrie(s)") {
+		t.Fatalf("doctor output missing history hint:\n%s", joined)
+	}
+}

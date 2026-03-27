@@ -713,7 +713,7 @@ func renderDoctor(report app.DoctorReport) error {
 		if check.Name == "expectation" || (check.Name == "state" && strings.Contains(check.Message, "not initialized")) {
 			notes = append(notes, check.Message)
 		}
-		if check.Name == "bundle" || check.Name == "run_directory" {
+		if check.Name == "bundle" || check.Name == "run_directory" || check.Name == "history" {
 			notes = append(notes, check.Message)
 		}
 	}
