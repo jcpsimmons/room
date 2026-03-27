@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -120,6 +121,13 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	checks = append(checks, DoctorCheck{Name: "jq", OK: true, Message: "jq is not required for ROOM v1"})
 
 	paths := config.ResolvePaths(repoRoot, configPath, cfg)
+	if ignoreOK, err := gitInfoExcludeProtectsRoom(repoRoot); err != nil {
+		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: err.Error()})
+	} else if ignoreOK {
+		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: true, Message: ".git/info/exclude already protects .room/"})
+	} else {
+		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: ".git/info/exclude does not mention .room/; run `room init` or add it manually to keep plain `git status` clean"})
+	}
 	if fsutil.DirExists(paths.RoomDir) {
 		var problems []string
 		if !fsutil.FileExists(paths.ConfigPath) {
@@ -195,4 +203,21 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		Checks:   checks,
 		Lines:    lines,
 	}, nil
+}
+
+func gitInfoExcludeProtectsRoom(repoRoot string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".git", "info", "exclude"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == ".room/" {
+			return true, nil
+		}
+	}
+	return false, nil
 }

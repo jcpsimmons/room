@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -123,5 +124,62 @@ func TestDoctorSurfacesRunLockStatus(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected run_lock check, got %#v", report.Checks)
+	}
+}
+
+func TestDoctorReportsGitInfoExcludeProtection(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	prepareInitializedRepo(t, repoRoot)
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name == "git_info_exclude" {
+			found = true
+			if check.OK {
+				t.Fatalf("expected missing exclude protection to fail, got %#v", check)
+			}
+			if !strings.Contains(check.Message, "does not mention .room/") {
+				t.Fatalf("unexpected exclude check message: %#v", check)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected git_info_exclude check, got %#v", report.Checks)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoRoot, ".git", "info", "exclude"), []byte(".room/\n"), 0o644); err != nil {
+		t.Fatalf("write exclude: %v", err)
+	}
+
+	report, err = svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor after exclude: %v", err)
+	}
+
+	found = false
+	for _, check := range report.Checks {
+		if check.Name == "git_info_exclude" {
+			found = true
+			if !check.OK {
+				t.Fatalf("expected exclude protection to pass, got %#v", check)
+			}
+			if !strings.Contains(check.Message, "already protects .room/") {
+				t.Fatalf("unexpected exclude check message: %#v", check)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected git_info_exclude check after writing exclude, got %#v", report.Checks)
 	}
 }
