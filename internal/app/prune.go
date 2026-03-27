@@ -19,13 +19,15 @@ type PruneOptions struct {
 }
 
 type PruneReport struct {
-	RepoRoot string   `json:"repo_root"`
-	RunsDir  string   `json:"runs_dir"`
-	Keep     int      `json:"keep"`
-	DryRun   bool     `json:"dry_run"`
-	Removed  []string `json:"removed,omitempty"`
-	Kept     []string `json:"kept,omitempty"`
-	Lines    []string `json:"lines"`
+	RepoRoot            string   `json:"repo_root"`
+	RunsDir             string   `json:"runs_dir"`
+	Keep                int      `json:"keep"`
+	DryRun              bool     `json:"dry_run"`
+	Removed             []string `json:"removed,omitempty"`
+	Kept                []string `json:"kept,omitempty"`
+	RecoveryBundle      string   `json:"recovery_bundle,omitempty"`
+	RecoveryBundleDrift int      `json:"recovery_bundle_drift,omitempty"`
+	Lines               []string `json:"lines"`
 }
 
 func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, error) {
@@ -52,12 +54,21 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		addProtectedBundleReference(protectedBundles, snapshot.LastRunDirectory, "last run")
 		addProtectedBundleReference(protectedBundles, snapshot.LastFailureRunDirectory, "last failure")
 	}
+	recoveryBundle, recoveryDrift, err := newestVerifiedRecoveryBundle(bundles)
+	if err != nil {
+		return PruneReport{}, err
+	}
+	if recoveryBundle != "" {
+		addProtectedBundleReference(protectedBundles, recoveryBundle, "newest verified recovery bundle")
+	}
 
 	report := PruneReport{
-		RepoRoot: repoRoot,
-		RunsDir:  paths.RunsDir,
-		Keep:     opts.Keep,
-		DryRun:   opts.DryRun,
+		RepoRoot:            repoRoot,
+		RunsDir:             paths.RunsDir,
+		Keep:                opts.Keep,
+		DryRun:              opts.DryRun,
+		RecoveryBundle:      recoveryBundle,
+		RecoveryBundleDrift: recoveryDrift,
 	}
 
 	lines := []string{
@@ -65,6 +76,9 @@ func (s *Service) Prune(ctx context.Context, opts PruneOptions) (PruneReport, er
 		fmt.Sprintf("Repo: %s", repoRoot),
 		fmt.Sprintf("Runs dir: %s", paths.RunsDir),
 		fmt.Sprintf("Keeping newest %d bundle(s).", opts.Keep),
+	}
+	if recoveryBundle != "" {
+		lines = append(lines, fmt.Sprintf("Recovery anchor: keeping %s because %d newer bundle(s) drifted out of tune.", recoveryBundle, recoveryDrift))
 	}
 
 	if len(bundles) == 0 {
@@ -152,4 +166,33 @@ func formatStateReferenceSuffix(reasons []string) string {
 		return ""
 	}
 	return fmt.Sprintf(" (referenced by state.json %s)", strings.Join(reasons, " and "))
+}
+
+func newestVerifiedRecoveryBundle(bundles []runBundle) (string, int, error) {
+	drifted := 0
+	for _, bundle := range bundles {
+		assessment, err := assessBundle(bundle.path)
+		if err != nil {
+			return "", 0, err
+		}
+		if assessment.Integrity == bundleIntegrityOK {
+			if drifted == 0 {
+				return "", 0, nil
+			}
+			return bundle.path, drifted, nil
+		}
+		if bundleShowsRecoveryDrift(assessment) {
+			drifted++
+			continue
+		}
+		return "", 0, nil
+	}
+	return "", 0, nil
+}
+
+func bundleShowsRecoveryDrift(assessment bundleAssessment) bool {
+	if assessment.Integrity == bundleIntegrityOK {
+		return false
+	}
+	return strings.TrimSpace(assessment.Hint) != "" || len(assessment.Hints) > 0
 }
