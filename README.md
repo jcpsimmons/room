@@ -156,7 +156,7 @@ Use `room init --prompt "..."` to seed `instruction.txt` with your own starting 
 
 ### `room run`
 
-Runs the improvement loop. In an interactive terminal, `room run` opens the live TUI by default. Set `ROOM_TUI=0` to force plain progress output instead, or pass `--no-sound` to keep the TUI without audio.
+Runs the improvement loop. In an interactive terminal, `room run` opens the live TUI by default. Set `ROOM_TUI=0` to force plain progress output instead, or pass `--no-sound` to keep the TUI without audio. `room run --json` emits newline-delimited progress events followed by the final result so automation can watch the loop without the TUI.
 
 Each iteration:
 

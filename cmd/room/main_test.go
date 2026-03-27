@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/app"
 	"github.com/jcpsimmons/room/internal/claude"
@@ -130,6 +133,67 @@ func TestResolveInitPrompt(t *testing.T) {
 	if _, err := resolveInitPrompt("-", strings.NewReader(" \n\t")); err == nil {
 		t.Fatal("expected empty stdin prompt to fail")
 	}
+}
+
+func TestRunJSONStreamEncoding(t *testing.T) {
+	var buf bytes.Buffer
+	stream := newJSONLineWriter(&buf)
+
+	stream.Write(makeRunJSONProgressLine(app.RunProgressEvent{
+		Phase:      app.RunProgressPhaseIterationFailure,
+		Iteration:  7,
+		Status:     "failed",
+		Err:        errors.New("malformed output"),
+		StartedAt:  fixedTime(),
+		FinishedAt: fixedTime().Add(2 * time.Second),
+	}))
+	stream.Write(makeRunJSONResultLine(app.RunReport{
+		RepoRoot:            "/tmp/repo",
+		Provider:            "codex",
+		RequestedIterations: 3,
+		CompletedIterations: 1,
+		Failures:            1,
+		LastStatus:          "failed",
+		LastRunDir:          "/tmp/repo/.room/runs/0007",
+		Lines:               []string{"Iteration 7 failed: malformed output"},
+	}, errors.New("malformed output")))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("line count = %d, want 2", len(lines))
+	}
+
+	var progress map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &progress); err != nil {
+		t.Fatalf("decode progress: %v", err)
+	}
+	if progress["type"] != "progress" {
+		t.Fatalf("progress type = %v", progress["type"])
+	}
+	if progress["phase"] != string(app.RunProgressPhaseIterationFailure) {
+		t.Fatalf("progress phase = %v", progress["phase"])
+	}
+	if progress["error"] != "malformed output" {
+		t.Fatalf("progress error = %v", progress["error"])
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result["type"] != "result" {
+		t.Fatalf("result type = %v", result["type"])
+	}
+	if got, ok := result["ok"].(bool); !ok || got {
+		t.Fatalf("expected failure result, got ok=true")
+	}
+	if result["error"] != "malformed output" {
+		t.Fatalf("result error = %v", result["error"])
+	}
+}
+
+func fixedTime() time.Time {
+	return time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 }
 
 var errTestBoom = testError("boom")

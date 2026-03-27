@@ -111,8 +111,7 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				}
 				return renderLines(report.Lines)
 			}
-			report, err := svc.Run(ctx, opts)
-			return printJSON(report, err)
+			return runWithJSON(ctx, svc, opts)
 		},
 	}
 	cmd.Flags().IntVar(&opts.Iterations, "iterations", 0, "maximum iterations to run")
@@ -122,7 +121,7 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.AllowDirty, "allow-dirty", false, "allow starting from a dirty repository")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "build prompts and artifacts without executing the agent")
 	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "print more per-iteration detail")
-	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit machine-readable JSON")
+	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit newline-delimited JSON progress events and the final result")
 	cmd.Flags().BoolVar(&noSound, "no-sound", false, "disable TUI sound output")
 	cmd.Flags().StringVar(&opts.InstructionFile, "instruction-file", "", "override the instruction file path")
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", "", "override the config path")
@@ -351,6 +350,69 @@ func runWithLiveProgress(ctx context.Context, svc *app.Service, opts app.RunOpti
 	report, err := svc.Run(ctx, opts)
 	renderErr := renderRun(report)
 	return errors.Join(err, renderErr)
+}
+
+func runWithJSON(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
+	stream := newJSONLineWriter(os.Stdout)
+	opts.Progress = func(event app.RunProgressEvent) {
+		stream.Write(makeRunJSONProgressLine(event))
+	}
+
+	report, err := svc.Run(ctx, opts)
+	stream.Write(makeRunJSONResultLine(report, err))
+	return errors.Join(err, stream.Err())
+}
+
+type jsonLineWriter struct {
+	enc *json.Encoder
+	err error
+}
+
+func newJSONLineWriter(w io.Writer) *jsonLineWriter {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return &jsonLineWriter{enc: enc}
+}
+
+func (w *jsonLineWriter) Write(v any) {
+	if w.err != nil {
+		return
+	}
+	w.err = w.enc.Encode(v)
+}
+
+func (w *jsonLineWriter) Err() error {
+	return w.err
+}
+
+type runJSONProgressEvent struct {
+	Type string `json:"type"`
+	app.RunProgressEvent
+	Error string `json:"error,omitempty"`
+}
+
+type runJSONResultLine struct {
+	Type   string        `json:"type"`
+	OK     bool          `json:"ok"`
+	Result app.RunReport `json:"result,omitempty"`
+	Error  string        `json:"error,omitempty"`
+}
+
+func makeRunJSONProgressLine(event app.RunProgressEvent) runJSONProgressEvent {
+	line := runJSONProgressEvent{Type: "progress", RunProgressEvent: event}
+	if event.Err != nil {
+		line.Error = event.Err.Error()
+	}
+	return line
+}
+
+func makeRunJSONResultLine(report app.RunReport, err error) runJSONResultLine {
+	return runJSONResultLine{
+		Type:   "result",
+		OK:     err == nil,
+		Result: report,
+		Error:  errorText(err, ""),
+	}
 }
 
 func formatRunProgress(event app.RunProgressEvent) []string {
