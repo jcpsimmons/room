@@ -1,10 +1,8 @@
 package logs
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +70,7 @@ func ReadRecentSummariesDetailed(path string, limit int) (entries []SummaryEntry
 	if limit <= 0 {
 		return nil, 0, nil
 	}
-	lines, err := readAllLogLines(path)
+	lines, err := readRecentLogLines(path, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -189,35 +187,6 @@ func readRecentLogLines(path string, limit int) ([]string, error) {
 	}
 	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
 		lines[i], lines[j] = lines[j], lines[i]
-	}
-	return lines, nil
-}
-
-func readAllLogLines(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	reader := bufio.NewReader(f)
-	var lines []string
-	for {
-		line, readErr := reader.ReadString('\n')
-		if line != "" {
-			lines = append(lines, strings.TrimRight(line, "\r\n"))
-		}
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			return nil, readErr
-		}
 	}
 	return lines, nil
 }
