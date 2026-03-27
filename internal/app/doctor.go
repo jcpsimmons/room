@@ -18,6 +18,8 @@ import (
 	"github.com/jcpsimmons/room/internal/state"
 )
 
+var lookPath = exec.LookPath
+
 type DoctorOptions struct {
 	WorkingDir string
 	ConfigPath string
@@ -76,15 +78,19 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	provider := agent.NormalizeProvider(cfg.Agent.Provider)
 	binary := s.binaryForProvider(cfg)
 	displayName := agent.DisplayName(provider)
+	checks = append(checks, DoctorCheck{Name: "provider_binary", OK: true, Message: fmt.Sprintf("configured %s binary: %s", strings.ToLower(displayName), binary)})
 
 	runner, runnerErr := s.runnerForProvider(provider)
 	if runnerErr != nil {
 		checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: runnerErr.Error()})
 	} else {
-		if _, err := exec.LookPath(binary); err != nil {
-			checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: fmt.Sprintf("%s binary not found: %s", displayName, binary)})
+		resolvedBinary, err := lookPath(binary)
+		if err != nil {
+			checks = append(checks, DoctorCheck{Name: "provider_path", OK: false, Message: fmt.Sprintf("PATH search for %s failed: %v", binary, err)})
+			checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: fmt.Sprintf("%s binary not found on PATH: %s", displayName, binary)})
 		} else {
-			versionText, versionErr := runner.Version(ctx, binary)
+			checks = append(checks, DoctorCheck{Name: "provider_path", OK: true, Message: fmt.Sprintf("PATH search resolved %s to %s", binary, resolvedBinary)})
+			versionText, versionErr := runner.Version(ctx, resolvedBinary)
 			if versionErr != nil {
 				checks = append(checks, DoctorCheck{Name: "provider", OK: false, Message: versionErr.Error()})
 			} else {
@@ -111,7 +117,7 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 				authArgs = []string{"auth", "status", "--text"}
 				authFailure = "auth status failed; authenticate separately before running ROOM"
 			}
-			statusOut, statusErr := exec.CommandContext(ctx, binary, authArgs...).CombinedOutput()
+			statusOut, statusErr := exec.CommandContext(ctx, resolvedBinary, authArgs...).CombinedOutput()
 			if statusErr != nil {
 				checks = append(checks, DoctorCheck{Name: "auth", OK: false, Message: fmt.Sprintf("%s %s", displayName, authFailure)})
 			} else {

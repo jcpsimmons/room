@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -264,5 +265,65 @@ func TestDoctorSurfacesMalformedRoomIgnore(t *testing.T) {
 
 	if !strings.Contains(strings.Join(report.Lines, "\n"), "malformed .roomignore") {
 		t.Fatalf("doctor output missing malformed roomignore hint:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}
+
+func TestDoctorReportsProviderBinaryResolution(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	originalLookPath := lookPath
+	t.Cleanup(func() {
+		lookPath = originalLookPath
+	})
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	lookPath = func(binary string) (string, error) {
+		if binary == "codex" {
+			return "/opt/room/bin/codex", nil
+		}
+		return "", errors.New("unexpected lookPath binary")
+	}
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor resolved: %v", err)
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"configured codex binary: codex",
+		"PATH search resolved codex to /opt/room/bin/codex",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, joined)
+		}
+	}
+
+	lookPath = func(binary string) (string, error) {
+		if binary == "codex" {
+			return "", errors.New("executable file not found in $PATH")
+		}
+		return "", errors.New("unexpected lookPath binary")
+	}
+
+	report, err = svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor missing: %v", err)
+	}
+
+	joined = strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"PATH search for codex failed: executable file not found in $PATH",
+		"binary not found on PATH: codex",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, joined)
+		}
 	}
 }
