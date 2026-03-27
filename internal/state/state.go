@@ -15,6 +15,8 @@ type Snapshot struct {
 	TotalSuccessfulIterations int       `json:"total_successful_iterations"`
 	TotalFailures             int       `json:"total_failures"`
 	LastStatus                string    `json:"last_status"`
+	LastFailure               string    `json:"last_failure,omitempty"`
+	LastFailureRunDirectory   string    `json:"last_failure_run_directory,omitempty"`
 	CreatedAt                 time.Time `json:"created_at"`
 	UpdatedAt                 time.Time `json:"updated_at"`
 	LastRunAt                 time.Time `json:"last_run_at"`

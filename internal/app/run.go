@@ -161,6 +161,8 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	if err != nil {
 		return RunReport{}, err
 	}
+	snapshot.LastFailure = ""
+	snapshot.LastFailureRunDirectory = ""
 
 	dirty, err := s.git.IsDirty(ctx, repoRoot)
 	if err != nil {
@@ -368,6 +370,12 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			failures++
 			snapshot.TotalFailures++
 			snapshot.LastStatus = "failed"
+			failureNote := runFailureNote(runErr)
+			if failureNote == "" {
+				failureNote = runErr.Error()
+			}
+			snapshot.LastFailure = failureNote
+			snapshot.LastFailureRunDirectory = runDir
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, errors.Join(runErr, err)
 			}
@@ -500,6 +508,8 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 
 		snapshot.TotalSuccessfulIterations++
 		snapshot.LastStatus = statusValue
+		snapshot.LastFailure = ""
+		snapshot.LastFailureRunDirectory = ""
 		snapshot.LastSummary = execution.Result.Summary
 		snapshot.LastNextInstruction = nextInstruction
 		snapshot.CurrentInstructionHash = state.InstructionHash(nextInstruction)

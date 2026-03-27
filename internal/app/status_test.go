@@ -10,6 +10,7 @@ import (
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/logs"
+	"github.com/jcpsimmons/room/internal/state"
 	"github.com/jcpsimmons/room/internal/version"
 )
 
@@ -198,6 +199,44 @@ func TestStatusSurfacesStaleLockRecoveryState(t *testing.T) {
 	joined := strings.Join(report.Lines, "\n")
 	if !strings.Contains(joined, "Stale-lock recovery: Reclaimed stale run lock from pid 4242 started 2026-03-25T11:00:00Z.") {
 		t.Fatalf("status lines missing recovery state:\n%s", joined)
+	}
+}
+
+func TestStatusSurfacesLastFailureContext(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.LastStatus = "failed"
+	snapshot.LastFailure = "Wrapper drift detected: Claude output envelope was malformed."
+	snapshot.LastFailureRunDirectory = filepath.Join(paths.RunsDir, "0007")
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.LastFailure == "" {
+		t.Fatal("expected last failure context")
+	}
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"Last failure in " + filepath.Join(paths.RunsDir, "0007") + ": Wrapper drift detected: Claude output envelope was malformed.",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("status lines missing %q:\n%s", want, joined)
+		}
 	}
 }
 

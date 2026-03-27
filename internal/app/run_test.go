@@ -828,6 +828,17 @@ func TestRunSurfacesClaudeWrapperDrift(t *testing.T) {
 	if !strings.Contains(joined, "claude wrapper drift detected") {
 		t.Fatalf("run output missing wrapper drift failure text:\n%s", joined)
 	}
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if snapshot.LastFailure != "Wrapper drift detected: Claude output envelope was malformed." {
+		t.Fatalf("last failure = %q", snapshot.LastFailure)
+	}
+	if snapshot.LastFailureRunDirectory != filepath.Join(paths.RunsDir, "0001") {
+		t.Fatalf("last failure run dir = %q", snapshot.LastFailureRunDirectory)
+	}
 }
 
 func TestRunUsesConfigUntilDoneWhenFlagIsUnset(t *testing.T) {

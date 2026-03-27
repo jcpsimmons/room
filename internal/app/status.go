@@ -36,6 +36,8 @@ type StatusReport struct {
 	LatestLockHint             string                `json:"latest_lock_hint,omitempty"`
 	RoomIgnoreHint             string                `json:"room_ignore_hint,omitempty"`
 	PromptHistoryHint          string                `json:"prompt_history_hint,omitempty"`
+	LastFailure                string                `json:"last_failure,omitempty"`
+	LastFailureRunDirectory    string                `json:"last_failure_run_directory,omitempty"`
 	Dirty                      bool                  `json:"dirty"`
 	Lines                      []string              `json:"lines"`
 }
@@ -117,6 +119,13 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if lockHint != "" {
 		lines = append(lines, lockHint)
 	}
+	if snapshot.LastFailure != "" {
+		if snapshot.LastFailureRunDirectory != "" {
+			lines = append(lines, fmt.Sprintf("Last failure in %s: %s", snapshot.LastFailureRunDirectory, snapshot.LastFailure))
+		} else {
+			lines = append(lines, fmt.Sprintf("Last failure: %s", snapshot.LastFailure))
+		}
+	}
 	roomIgnoreHint, err := loadRoomIgnoreHint(repoRoot)
 	if err != nil {
 		return StatusReport{}, err
@@ -164,6 +173,8 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		LatestLockHint:             lockHint,
 		RoomIgnoreHint:             roomIgnoreHint,
 		PromptHistoryHint:          promptHistoryHint,
+		LastFailure:                snapshot.LastFailure,
+		LastFailureRunDirectory:    snapshot.LastFailureRunDirectory,
 		Dirty:                      dirty,
 		Lines:                      lines,
 	}, nil
