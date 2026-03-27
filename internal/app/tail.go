@@ -25,6 +25,7 @@ type TailReport struct {
 	RunDir            string        `json:"run_dir"`
 	BundleMode        string        `json:"bundle_mode,omitempty"`
 	BundleIntegrity   string        `json:"bundle_integrity,omitempty"`
+	BundleIntegrityHints []BundleIntegrityHint `json:"bundle_integrity_hints,omitempty"`
 	Prompt            string        `json:"prompt"`
 	Result            *agent.Result `json:"result,omitempty"`
 	Diff              git.DiffStats `json:"diff"`
@@ -73,6 +74,9 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if assessment.Hint != "" {
 		lines = append(lines, assessment.Hint)
 	}
+	if len(assessment.Hints) > 0 {
+		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(assessment.Hints)))
+	}
 	lines = append(lines,
 		"Prompt:",
 		indent(strings.TrimSpace(string(promptBody))),
@@ -104,6 +108,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		RunDir:          runDir,
 		BundleMode:      string(assessment.Mode),
 		BundleIntegrity: assessment.Integrity,
+		BundleIntegrityHints: assessment.Hints,
 		Prompt:          strings.TrimSpace(string(promptBody)),
 		Result:          resultIfPresent(result, hasResult),
 		Diff:            statsIfPresent(stats, hasStats),

@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -22,12 +22,26 @@ const (
 	bundleModeDryRun    bundleMode = "dry_run"
 	bundleModeExecuted  bundleMode = "executed"
 	bundleModeLegacy    bundleMode = "legacy"
-	bundleIntegrityOK              = "verified"
-	bundleIntegrityWarn            = "unverified"
-	bundleIntegrityBad             = "mismatch"
+	bundleIntegrityOK               = "verified"
+	bundleIntegrityWarn             = "unverified"
+	bundleIntegrityBad              = "mismatch"
 )
 
 var errMalformedBundleManifest = fmt.Errorf("malformed bundle manifest")
+
+const (
+	bundleIntegrityHintDecodeFailed     = "manifest_decode_failed"
+	bundleIntegrityHintModeInvalid      = "manifest_mode_invalid"
+	bundleIntegrityHintRunDirMissing    = "manifest_run_dir_missing"
+	bundleIntegrityHintArtifactName     = "manifest_artifact_name_missing"
+	bundleIntegrityHintArtifactDuplicate = "manifest_artifact_duplicate"
+	bundleIntegrityHintArtifactHash      = "manifest_artifact_hash_invalid"
+	bundleIntegrityHintFileMissing       = "artifact_file_missing"
+	bundleIntegrityHintSizeChanged       = "artifact_size_changed"
+	bundleIntegrityHintChecksumChanged   = "artifact_hash_changed"
+	bundleIntegrityHintManifestMissing   = "manifest_artifact_missing"
+	bundleIntegrityHintRunArtifactMissing = "run_artifact_missing"
+)
 
 type bundleArtifact struct {
 	Name   string `json:"name"`
@@ -42,12 +56,27 @@ type bundleManifest struct {
 	Artifacts []bundleArtifact `json:"artifacts"`
 }
 
+type BundleIntegrityHint struct {
+	Code     string `json:"code"`
+	Artifact string `json:"artifact,omitempty"`
+	Detail   string `json:"detail"`
+}
+
 type bundleAssessment struct {
 	RunDir     string
 	Mode       bundleMode
 	Integrity  string
 	Hint       string
 	ManifestOK bool
+	Hints      []BundleIntegrityHint
+}
+
+func newBundleIntegrityHint(code, detail, artifact string) BundleIntegrityHint {
+	return BundleIntegrityHint{
+		Code:     code,
+		Detail:   detail,
+		Artifact: artifact,
+	}
 }
 
 func writeBundleManifest(runDir string, mode bundleMode, artifactNames []string) error {
@@ -81,62 +110,103 @@ func writeBundleManifest(runDir string, mode bundleMode, artifactNames []string)
 	return fsutil.AtomicWriteFile(filepath.Join(runDir, "bundle.json"), data, 0o644)
 }
 
-func readBundleManifest(runDir string) (bundleManifest, bool, error) {
+func readBundleManifest(runDir string) (bundleManifest, bool, []BundleIntegrityHint, error) {
 	data, err := fsutil.ReadFileIfExists(filepath.Join(runDir, "bundle.json"))
 	if err != nil {
-		return bundleManifest{}, false, err
+		return bundleManifest{}, false, nil, err
 	}
 	if len(data) == 0 {
-		return bundleManifest{}, false, nil
+		return bundleManifest{}, false, nil, nil
 	}
 
 	var manifest bundleManifest
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&manifest); err != nil {
-		return bundleManifest{}, false, err
+		return bundleManifest{}, false, []BundleIntegrityHint{
+			newBundleIntegrityHint(bundleIntegrityHintDecodeFailed, err.Error(), ""),
+		}, err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err == nil {
-			return bundleManifest{}, false, fmt.Errorf("%w: unexpected trailing data", errMalformedBundleManifest)
+			hints := []BundleIntegrityHint{
+				newBundleIntegrityHint(bundleIntegrityHintDecodeFailed, "unexpected trailing data", ""),
+			}
+			return bundleManifest{}, false, hints, fmt.Errorf("%w: unexpected trailing data", errMalformedBundleManifest)
 		}
-		return bundleManifest{}, false, err
+		return bundleManifest{}, false, nil, err
 	}
-	if err := manifest.validate(); err != nil {
-		return bundleManifest{}, false, fmt.Errorf("%w: %v", errMalformedBundleManifest, err)
+
+	hints := manifest.validate()
+	if len(hints) > 0 {
+		return manifest, false, hints, fmt.Errorf("%w: %v", errMalformedBundleManifest, hints[0].Detail)
 	}
-	return manifest, true, nil
+	return manifest, true, nil, nil
 }
 
-func (manifest bundleManifest) validate() error {
+func (manifest bundleManifest) validate() []BundleIntegrityHint {
+	hints := make([]BundleIntegrityHint, 0, 4)
 	if strings.TrimSpace(manifest.RunDir) == "" {
-		return fmt.Errorf("missing run_dir")
+		hints = append(hints, newBundleIntegrityHint(
+			bundleIntegrityHintRunDirMissing,
+			"run_dir missing",
+			"",
+		))
 	}
+
 	switch manifest.Mode {
 	case bundleModeDryRun, bundleModeExecuted, bundleModeLegacy:
 	default:
-		return fmt.Errorf("invalid mode %q", manifest.Mode)
+		hints = append(hints, newBundleIntegrityHint(
+			bundleIntegrityHintModeInvalid,
+			fmt.Sprintf("invalid mode %q", manifest.Mode),
+			"mode",
+		))
 	}
+
 	seen := make(map[string]struct{}, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {
 		if strings.TrimSpace(artifact.Name) == "" {
-			return fmt.Errorf("artifact name missing")
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintArtifactName,
+				"artifact name missing",
+				"",
+			))
+			continue
 		}
+
 		if _, ok := seen[artifact.Name]; ok {
-			return fmt.Errorf("duplicate artifact %q", artifact.Name)
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintArtifactDuplicate,
+				fmt.Sprintf("duplicate artifact %q", artifact.Name),
+				artifact.Name,
+			))
+			continue
 		}
 		seen[artifact.Name] = struct{}{}
+
 		if len(artifact.SHA256) != 64 {
-			return fmt.Errorf("artifact %q has malformed sha256", artifact.Name)
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintArtifactHash,
+				fmt.Sprintf("artifact %q has malformed sha256", artifact.Name),
+				artifact.Name,
+			))
+			continue
 		}
 		for _, r := range artifact.SHA256 {
 			if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') {
 				continue
 			}
-			return fmt.Errorf("artifact %q has malformed sha256", artifact.Name)
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintArtifactHash,
+				fmt.Sprintf("artifact %q has malformed sha256", artifact.Name),
+				artifact.Name,
+			))
+			break
 		}
 	}
-	return nil
+
+	return hints
 }
 
 func assessNewestBundle(runsDir string) (bundleAssessment, error) {
@@ -168,9 +238,17 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 		Integrity: bundleIntegrityWarn,
 	}
 
-	manifest, ok, err := readBundleManifest(runDir)
+	manifest, ok, manifestHints, err := readBundleManifest(runDir)
 	if err != nil {
 		assessment.Integrity = bundleIntegrityBad
+		assessment.Hints = append(assessment.Hints, manifestHints...)
+		if len(manifestHints) == 0 {
+			assessment.Hints = append(assessment.Hints, newBundleIntegrityHint(
+				bundleIntegrityHintDecodeFailed,
+				err.Error(),
+				"",
+			))
+		}
 		assessment.Hint = fmt.Sprintf("Hint: %s %s has an unreadable manifest: %v.", subject, filepath.Base(runDir), err)
 		return assessment, nil
 	}
@@ -178,7 +256,15 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 		missing := missingBundleArtifacts(runDir, bundleModeExecuted)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityWarn
+			for _, name := range missing {
+				assessment.Hints = append(assessment.Hints, newBundleIntegrityHint(
+					bundleIntegrityHintRunArtifactMissing,
+					"required run artifact missing",
+					name,
+				))
+			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
+			return assessment, nil
 		}
 		return assessment, nil
 	}
@@ -189,6 +275,13 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 		missing := missingBundleArtifacts(runDir, bundleModeDryRun)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityBad
+			for _, name := range missing {
+				assessment.Hints = append(assessment.Hints, newBundleIntegrityHint(
+					bundleIntegrityHintRunArtifactMissing,
+					"required run artifact missing",
+					name,
+				))
+			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is missing dry-run prompt artifact(s): %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 			return assessment, nil
 		}
@@ -196,6 +289,13 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 		missing := missingBundleArtifacts(runDir, bundleModeExecuted)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityWarn
+			for _, name := range missing {
+				assessment.Hints = append(assessment.Hints, newBundleIntegrityHint(
+					bundleIntegrityHintRunArtifactMissing,
+					"required run artifact missing",
+					name,
+				))
+			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 			return assessment, nil
 		}
@@ -203,13 +303,22 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 		missing := missingBundleArtifacts(runDir, bundleModeExecuted)
 		if len(missing) > 0 {
 			assessment.Integrity = bundleIntegrityWarn
+			for _, name := range missing {
+				assessment.Hints = append(assessment.Hints, newBundleIntegrityHint(
+					bundleIntegrityHintRunArtifactMissing,
+					"required run artifact missing",
+					name,
+				))
+			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
 			return assessment, nil
 		}
 	}
 
-	if err := verifyBundleManifest(runDir, manifest); err != nil {
+	integrityHints, err := verifyBundleManifest(runDir, manifest)
+	if err != nil {
 		assessment.Integrity = bundleIntegrityBad
+		assessment.Hints = append(assessment.Hints, integrityHints...)
 		assessment.Hint = fmt.Sprintf("Hint: %s %s failed integrity check: %v.", subject, filepath.Base(runDir), err)
 		return assessment, nil
 	}
@@ -219,7 +328,8 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 	return assessment, nil
 }
 
-func verifyBundleManifest(runDir string, manifest bundleManifest) error {
+func verifyBundleManifest(runDir string, manifest bundleManifest) ([]BundleIntegrityHint, error) {
+	hints := make([]BundleIntegrityHint, 0, len(manifest.Artifacts))
 	seen := make(map[string]bundleArtifact, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {
 		seen[artifact.Name] = artifact
@@ -229,24 +339,44 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) error {
 		path := filepath.Join(runDir, artifact.Name)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("%s missing", artifact.Name)
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintFileMissing,
+				"artifact file missing",
+				artifact.Name,
+			))
+			return hints, fmt.Errorf("%s missing", artifact.Name)
 		}
 		if int64(len(data)) != artifact.Size {
-			return fmt.Errorf("%s size changed", artifact.Name)
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintSizeChanged,
+				"artifact size changed",
+				artifact.Name,
+			))
+			return hints, fmt.Errorf("%s size changed", artifact.Name)
 		}
 		sum := sha256.Sum256(data)
 		if hex.EncodeToString(sum[:]) != artifact.SHA256 {
-			return fmt.Errorf("%s checksum changed", artifact.Name)
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintChecksumChanged,
+				"artifact checksum changed",
+				artifact.Name,
+			))
+			return hints, fmt.Errorf("%s checksum changed", artifact.Name)
 		}
 	}
 
 	for _, name := range expectedManifestArtifacts(manifest.Mode) {
 		if _, ok := seen[name]; !ok {
-			return fmt.Errorf("%s missing from manifest", name)
+			hints = append(hints, newBundleIntegrityHint(
+				bundleIntegrityHintManifestMissing,
+				"artifact missing from manifest",
+				name,
+			))
+			return hints, fmt.Errorf("%s missing from manifest", name)
 		}
 	}
 
-	return nil
+	return nil, nil
 }
 
 func missingBundleArtifacts(runDir string, mode bundleMode) []string {
@@ -282,4 +412,15 @@ func expectedManifestArtifacts(mode bundleMode) []string {
 			"diff.patch",
 		}
 	}
+}
+
+func manifestHintsJSON(hints []BundleIntegrityHint) string {
+	if len(hints) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(hints)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
 }

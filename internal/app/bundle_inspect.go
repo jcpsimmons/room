@@ -69,7 +69,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 		return BundleReport{}, err
 	}
 
-	manifest, manifestOK, err := readBundleManifest(runDir)
+	manifest, manifestOK, _, err := readBundleManifest(runDir)
 	if err != nil {
 		return BundleReport{}, err
 	}
