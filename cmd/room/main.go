@@ -84,6 +84,7 @@ func newInitCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 
 func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	var opts app.RunOptions
+	var noSound bool
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the improvement loop",
@@ -95,7 +96,7 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 			opts.JSONSet = cmd.Flags().Changed("json")
 			if !opts.JSON && canStyleOutput() {
 				if shouldUseRunUI() {
-					return runWithUI(ctx, svc, opts)
+					return runWithUI(ctx, svc, opts, noSound)
 				}
 				return runWithLiveProgress(ctx, svc, opts)
 			}
@@ -118,6 +119,7 @@ func newRunCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "build prompts and artifacts without executing the agent")
 	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "print more per-iteration detail")
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "emit machine-readable JSON")
+	cmd.Flags().BoolVar(&noSound, "no-sound", false, "disable TUI sound output")
 	cmd.Flags().StringVar(&opts.InstructionFile, "instruction-file", "", "override the instruction file path")
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", "", "override the config path")
 	cmd.Flags().StringVar(&opts.CommitPrefix, "commit-prefix", "", "override the configured commit prefix")
@@ -209,13 +211,13 @@ func newVersionCommand(info version.Info) *cobra.Command {
 	}
 }
 
-func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error {
+func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions, noSound bool) error {
 	total := opts.Iterations
 	if total <= 0 {
 		total = 1
 	}
 
-	model := ui.NewRunModel(total, ui.WithAudio())
+	model := ui.NewRunModel(total, runUIOptions(noSound)...)
 	program := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
@@ -250,6 +252,13 @@ func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions) error
 		return errors.Join(result.err, renderErr, uiErr)
 	}
 	return errors.Join(result.err, renderErr)
+}
+
+func runUIOptions(noSound bool) []ui.RunOption {
+	if noSound {
+		return nil
+	}
+	return []ui.RunOption{ui.WithAudio()}
 }
 
 func runWithLiveProgress(ctx context.Context, svc *app.Service, opts app.RunOptions) error {

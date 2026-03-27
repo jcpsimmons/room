@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jcpsimmons/room/internal/app"
+	"github.com/jcpsimmons/room/internal/ui"
 )
 
 func TestFormatRunProgress(t *testing.T) {
@@ -76,6 +77,22 @@ func TestShouldUseRunUI(t *testing.T) {
 				t.Fatalf("expected ROOM_TUI=%q to enable the TUI", value)
 			}
 		})
+	}
+}
+
+func TestRunUIOptions(t *testing.T) {
+	if got := runUIOptions(true); got != nil {
+		t.Fatalf("runUIOptions(true) = %#v, want nil", got)
+	}
+
+	opts := runUIOptions(false)
+	if len(opts) != 1 {
+		t.Fatalf("len(runUIOptions(false)) = %d, want 1", len(opts))
+	}
+
+	model := ui.NewRunModel(1, opts...)
+	if reflect.ValueOf(model).FieldByName("synth").IsNil() {
+		t.Fatal("expected audio synth when sound is enabled")
 	}
 }
 
