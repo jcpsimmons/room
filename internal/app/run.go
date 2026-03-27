@@ -173,6 +173,16 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	snapshot.LastProvider = provider
 	snapshot.LastProviderVersion = providerVersion
 
+	releaseLock, err := s.acquireRunLock(paths.RoomDir, repoRoot, provider)
+	if err != nil {
+		return RunReport{}, err
+	}
+	defer func() {
+		if releaseErr := releaseLock(); releaseErr != nil && err == nil {
+			err = releaseErr
+		}
+	}()
+
 	runner, err := s.runnerForProvider(provider)
 	if err != nil {
 		return RunReport{}, err

@@ -27,6 +27,7 @@ type StatusReport struct {
 	RecentCommits      []string            `json:"recent_commits"`
 	LatestRunDir       string              `json:"latest_run_dir,omitempty"`
 	LatestBundleHint   string              `json:"latest_bundle_hint,omitempty"`
+	LatestLockHint     string              `json:"latest_lock_hint,omitempty"`
 	Dirty              bool                `json:"dirty"`
 	Lines              []string            `json:"lines"`
 }
@@ -64,6 +65,10 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if err != nil {
 		return StatusReport{}, err
 	}
+	lockHint, err := runLockHint(paths.RoomDir, s.processAlive)
+	if err != nil {
+		return StatusReport{}, err
+	}
 
 	var commitLines []string
 	for _, commit := range commits {
@@ -83,6 +88,9 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	}
 	if bundleHint != "" {
 		lines = append(lines, bundleHint)
+	}
+	if lockHint != "" {
+		lines = append(lines, lockHint)
 	}
 	lines = append(lines,
 		"Current instruction:",
@@ -110,6 +118,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		RecentCommits:      commitLines,
 		LatestRunDir:       latestRunDir,
 		LatestBundleHint:   bundleHint,
+		LatestLockHint:     lockHint,
 		Dirty:              dirty,
 		Lines:              lines,
 	}, nil

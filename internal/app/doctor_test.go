@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/state"
@@ -75,5 +76,52 @@ diff --git a/a.txt b/a.txt
 	}
 	if !driftCheck {
 		t.Fatalf("expected run-directory drift check, got %#v", report.Checks)
+	}
+}
+
+func TestDoctorSurfacesRunLockStatus(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := writeRunLock(runLockPath(paths.RoomDir), runLock{
+		PID:         4242,
+		StartedAt:   time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+		RepoRoot:    repoRoot,
+		Provider:    "codex",
+		RoomVersion: "dev",
+	}); err != nil {
+		t.Fatalf("write run lock: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+		ProcessAlive: func(int) (bool, error) {
+			return false, nil
+		},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "stale run lock from pid 4242") {
+		t.Fatalf("doctor output missing lock hint:\n%s", joined)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name == "run_lock" {
+			found = true
+			if !strings.Contains(check.Message, "stale run lock from pid 4242") {
+				t.Fatalf("run_lock check = %#v", check)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected run_lock check, got %#v", report.Checks)
 	}
 }

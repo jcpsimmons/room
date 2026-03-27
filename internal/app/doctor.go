@@ -151,6 +151,12 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	} else if bundleHint != "" {
 		checks = append(checks, DoctorCheck{Name: "bundle", OK: false, Message: bundleHint})
 	}
+	lockHint, err := runLockHint(paths.RoomDir, s.processAlive)
+	if err != nil {
+		checks = append(checks, DoctorCheck{Name: "run_lock", OK: false, Message: err.Error()})
+	} else if lockHint != "" {
+		checks = append(checks, DoctorCheck{Name: "run_lock", OK: false, Message: lockHint})
+	}
 	if latestRunDir != "" && fsutil.FileExists(paths.StatePath) {
 		snapshot, err := state.Load(paths.StatePath)
 		if err != nil {

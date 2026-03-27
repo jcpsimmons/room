@@ -17,17 +17,19 @@ import (
 type Clock func() time.Time
 
 type Dependencies struct {
-	Git       git.Client
-	Providers map[string]agent.Runner
-	Now       Clock
-	Version   version.Info
+	Git          git.Client
+	Providers    map[string]agent.Runner
+	Now          Clock
+	Version      version.Info
+	ProcessAlive func(int) (bool, error)
 }
 
 type Service struct {
-	git       git.Client
-	providers map[string]agent.Runner
-	now       Clock
-	version   version.Info
+	git          git.Client
+	providers    map[string]agent.Runner
+	now          Clock
+	version      version.Info
+	processAlive func(int) (bool, error)
 }
 
 func NewService(deps Dependencies) *Service {
@@ -43,10 +45,11 @@ func NewService(deps Dependencies) *Service {
 		}
 	}
 	return &Service{
-		git:       deps.Git,
-		providers: providers,
-		now:       now,
-		version:   deps.Version,
+		git:          deps.Git,
+		providers:    providers,
+		now:          now,
+		version:      deps.Version,
+		processAlive: processAliveOrDefault(deps.ProcessAlive),
 	}
 }
 
@@ -125,4 +128,11 @@ func (s *Service) runOptionsForProvider(cfg config.Config, repoRoot string) agen
 
 func (s *Service) saveState(path string, snapshot state.Snapshot) error {
 	return state.SaveAt(path, snapshot, s.now())
+}
+
+func processAliveOrDefault(fn func(int) (bool, error)) func(int) (bool, error) {
+	if fn != nil {
+		return fn
+	}
+	return processAlive
 }

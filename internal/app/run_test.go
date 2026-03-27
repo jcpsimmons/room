@@ -191,6 +191,118 @@ func TestRunUsesCombinedDiffAndStats(t *testing.T) {
 	}
 }
 
+func TestRunRefusesAnActiveRunLock(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	lockPath := runLockPath(paths.RoomDir)
+	if err := writeRunLock(lockPath, runLock{
+		PID:         4242,
+		StartedAt:   time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+		RepoRoot:    repoRoot,
+		Provider:    "codex",
+		RoomVersion: "dev",
+	}); err != nil {
+		t.Fatalf("write run lock: %v", err)
+	}
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Should never run",
+				NextInstruction: "Should never run",
+				Status:          "continue",
+				CommitMessage:   "should not matter",
+			},
+		}},
+	}
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+		ProcessAlive: func(int) (bool, error) {
+			return true, nil
+		},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+	})
+	if err == nil {
+		t.Fatalf("expected active lock error")
+	}
+	if !strings.Contains(err.Error(), "another ROOM run is already active") {
+		t.Fatalf("run error = %v", err)
+	}
+	if report.CompletedIterations != 0 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner should not be invoked while lock is active")
+	}
+}
+
+func TestRunReclaimsAStaleRunLock(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	lockPath := runLockPath(paths.RoomDir)
+	if err := writeRunLock(lockPath, runLock{
+		PID:         4242,
+		StartedAt:   time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+		RepoRoot:    repoRoot,
+		Provider:    "codex",
+		RoomVersion: "dev",
+	}); err != nil {
+		t.Fatalf("write run lock: %v", err)
+	}
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Recovered from a stale lock",
+				NextInstruction: "Keep going",
+				Status:          "continue",
+				CommitMessage:   "recover from stale lock",
+			},
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/file b/file"},
+		statsSeq:     []git.DiffStats{{Files: 1, Added: 2, Deleted: 1}},
+		commitHashes: []string{"abc123"},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+		ProcessAlive: func(int) (bool, error) {
+			return false, nil
+		},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	if _, err := os.Stat(lockPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected stale lock to be cleaned up, stat err=%v", err)
+	}
+}
+
 func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, paths := prepareInitializedRepo(t, repoRoot)
