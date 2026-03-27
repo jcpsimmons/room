@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,6 +26,8 @@ const (
 	bundleIntegrityWarn            = "unverified"
 	bundleIntegrityBad             = "mismatch"
 )
+
+var errMalformedBundleManifest = fmt.Errorf("malformed bundle manifest")
 
 type bundleArtifact struct {
 	Name   string `json:"name"`
@@ -87,10 +91,52 @@ func readBundleManifest(runDir string) (bundleManifest, bool, error) {
 	}
 
 	var manifest bundleManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manifest); err != nil {
 		return bundleManifest{}, false, err
 	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return bundleManifest{}, false, fmt.Errorf("%w: unexpected trailing data", errMalformedBundleManifest)
+		}
+		return bundleManifest{}, false, err
+	}
+	if err := manifest.validate(); err != nil {
+		return bundleManifest{}, false, fmt.Errorf("%w: %v", errMalformedBundleManifest, err)
+	}
 	return manifest, true, nil
+}
+
+func (manifest bundleManifest) validate() error {
+	if strings.TrimSpace(manifest.RunDir) == "" {
+		return fmt.Errorf("missing run_dir")
+	}
+	switch manifest.Mode {
+	case bundleModeDryRun, bundleModeExecuted, bundleModeLegacy:
+	default:
+		return fmt.Errorf("invalid mode %q", manifest.Mode)
+	}
+	seen := make(map[string]struct{}, len(manifest.Artifacts))
+	for _, artifact := range manifest.Artifacts {
+		if strings.TrimSpace(artifact.Name) == "" {
+			return fmt.Errorf("artifact name missing")
+		}
+		if _, ok := seen[artifact.Name]; ok {
+			return fmt.Errorf("duplicate artifact %q", artifact.Name)
+		}
+		seen[artifact.Name] = struct{}{}
+		if len(artifact.SHA256) != 64 {
+			return fmt.Errorf("artifact %q has malformed sha256", artifact.Name)
+		}
+		for _, r := range artifact.SHA256 {
+			if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') {
+				continue
+			}
+			return fmt.Errorf("artifact %q has malformed sha256", artifact.Name)
+		}
+	}
+	return nil
 }
 
 func assessNewestBundle(runsDir string) (bundleAssessment, error) {
