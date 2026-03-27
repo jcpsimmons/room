@@ -98,15 +98,14 @@ func writeBundleManifest(runDir string, mode bundleMode, artifactNames []string,
 	}
 	for _, name := range artifactNames {
 		artifactPath := filepath.Join(runDir, name)
-		data, err := os.ReadFile(artifactPath)
+		size, sum, err := inspectBundleArtifact(artifactPath)
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(data)
 		manifest.Artifacts = append(manifest.Artifacts, bundleArtifact{
 			Name:   name,
-			Size:   int64(len(data)),
-			SHA256: hex.EncodeToString(sum[:]),
+			Size:   size,
+			SHA256: sum,
 		})
 	}
 	sort.Slice(manifest.Artifacts, func(i, j int) bool {
@@ -351,7 +350,7 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) ([]BundleInteg
 
 	for _, artifact := range manifest.Artifacts {
 		path := filepath.Join(runDir, artifact.Name)
-		data, err := os.ReadFile(path)
+		size, sum, err := inspectBundleArtifact(path)
 		if err != nil {
 			hints = append(hints, newBundleIntegrityHint(
 				bundleIntegrityHintFileMissing,
@@ -360,7 +359,7 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) ([]BundleInteg
 			))
 			return hints, fmt.Errorf("%s missing", artifact.Name)
 		}
-		if int64(len(data)) != artifact.Size {
+		if size != artifact.Size {
 			hints = append(hints, newBundleIntegrityHint(
 				bundleIntegrityHintSizeChanged,
 				"artifact size changed",
@@ -368,8 +367,7 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) ([]BundleInteg
 			))
 			return hints, fmt.Errorf("%s size changed", artifact.Name)
 		}
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) != artifact.SHA256 {
+		if sum != artifact.SHA256 {
 			hints = append(hints, newBundleIntegrityHint(
 				bundleIntegrityHintChecksumChanged,
 				"artifact checksum changed",
@@ -391,6 +389,21 @@ func verifyBundleManifest(runDir string, manifest bundleManifest) ([]BundleInteg
 	}
 
 	return nil, nil
+}
+
+func inspectBundleArtifact(path string) (int64, string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	size, err := io.Copy(hash, file)
+	if err != nil {
+		return 0, "", err
+	}
+	return size, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func appendArtifactDecodeWarning(assessment *bundleAssessment, subject, artifact string, err error) {

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -225,14 +227,23 @@ func readTailResultLenient(path string) (*agent.Result, bool, error, error) {
 }
 
 func readTailDiffStats(path string) (git.DiffStats, bool, error) {
-	data, err := fsutil.ReadFileIfExists(path)
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return git.DiffStats{}, false, nil
+		}
+		return git.DiffStats{}, false, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
 	if err != nil {
 		return git.DiffStats{}, false, err
 	}
-	if len(data) == 0 {
+	if info.Size() == 0 {
 		return git.DiffStats{}, false, nil
 	}
-	return parseDiffPatchStats(data), true, nil
+	return parseDiffPatchStats(file)
 }
 
 func statsIfPresent(stats git.DiffStats, ok bool) git.DiffStats {
@@ -249,17 +260,26 @@ func resultIfPresent(result *agent.Result, ok bool) *agent.Result {
 	return result
 }
 
-func parseDiffPatchStats(raw []byte) git.DiffStats {
+func parseDiffPatchStats(r io.Reader) (git.DiffStats, bool, error) {
 	var stats git.DiffStats
-	for _, line := range strings.Split(string(raw), "\n") {
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			stats.Files++
-		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-			stats.Added++
-		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-			stats.Deleted++
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			switch {
+			case strings.HasPrefix(line, "diff --git "):
+				stats.Files++
+			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+				stats.Added++
+			case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+				stats.Deleted++
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return stats, true, nil
+		}
+		if err != nil {
+			return git.DiffStats{}, false, err
 		}
 	}
-	return stats
 }
