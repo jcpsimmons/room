@@ -411,6 +411,13 @@ func TestCommandJSONEncoding(t *testing.T) {
 				return writePruneJSON(buf, app.PruneReport{RepoRoot: "/tmp/repo", RunsDir: "/tmp/repo/.room/runs"}, nil)
 			},
 		},
+		{
+			name:    "tape",
+			command: "tape",
+			write: func(buf *bytes.Buffer) error {
+				return writeTapeJSON(buf, app.TapeReport{RepoRoot: "/tmp/repo", Entries: []app.TapeEntry{{Iteration: 7, Status: "pivot"}}}, nil)
+			},
+		},
 	}
 
 	for _, tc := range tests {

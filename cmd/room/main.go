@@ -58,6 +58,7 @@ func newRootCommand(ctx context.Context, svc *app.Service, info version.Info) *c
 	root.AddCommand(newConfigCheckCommand(ctx, svc))
 	root.AddCommand(newBundleCommand(ctx, svc))
 	root.AddCommand(newTailCommand(ctx, svc))
+	root.AddCommand(newTapeCommand(ctx, svc))
 	root.AddCommand(newPruneCommand(ctx, svc))
 	root.AddCommand(newCompletionCommand(root))
 	root.AddCommand(newVersionCommand(info))
@@ -336,6 +337,34 @@ func newTailCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	return cmd
+}
+
+func newTapeCommand(ctx context.Context, svc *app.Service) *cobra.Command {
+	var configPath string
+	var limit int
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "tape",
+		Short: "Show recent ROOM iteration history",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := svc.Tape(ctx, app.TapeOptions{
+				WorkingDir: mustWD(),
+				ConfigPath: configPath,
+				Limit:      limit,
+			})
+			if asJSON {
+				return writeTapeJSON(os.Stdout, report, err)
+			}
+			if err != nil {
+				return err
+			}
+			return renderLines(report.Lines)
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().IntVar(&limit, "limit", app.DefaultTapeLimit, "number of recent iterations to show")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
 	return cmd
 }
@@ -871,6 +900,10 @@ func writeBundleJSON(w io.Writer, report app.BundleReport, err error) error {
 
 func writeTailJSON(w io.Writer, report app.TailReport, err error) error {
 	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "tail", report, err)
+}
+
+func writeTapeJSON(w io.Writer, report app.TapeReport, err error) error {
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "tape", report, err)
 }
 
 func writePruneJSON(w io.Writer, report app.PruneReport, err error) error {

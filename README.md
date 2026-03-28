@@ -101,6 +101,7 @@ room init
 room config-check
 room doctor
 room inspect
+room tape
 room bundle
 	room tail
 	room run --iterations 5
@@ -186,6 +187,10 @@ Validates `.room/config.toml` with the strict parser before a run starts. Use `-
 ### `room tail`
 
 Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured result, and diff stats without making you open the artifact directory by hand. Pass `--json` to inspect the newest tape without scraping text output.
+
+### `room tape`
+
+Shows recent iteration memory from `.room/summaries.log` and `.room/seen_instructions.txt`, pairing each summary with the next instruction ROOM wrote back to the sequencer plus compact diff and focus telemetry. Use `--limit N` to widen or tighten the window, or `--json` for automation.
 
 ### `room bundle`
 
