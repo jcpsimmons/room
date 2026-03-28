@@ -159,3 +159,31 @@ func TestConfigCheckSurfacesSchemaContractDrift(t *testing.T) {
 		t.Fatal("config check should not rewrite schema.json")
 	}
 }
+
+func TestConfigCheckSurfacesMissingEnvironmentPlaceholders(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	writeRepoFile(t, filepath.Join(repoRoot, "README.md"), "hello\n")
+	runGit(t, repoRoot, "add", "README.md")
+	runGit(t, repoRoot, "commit", "-m", "init")
+
+	writeRepoFile(t, filepath.Join(repoRoot, ".room", "config.toml"), `
+[codex]
+binary = "${ROOM_TEST_MISSING_CODEX_BINARY}"
+`)
+
+	svc := NewService(Dependencies{
+		Git:     git.NewClient(),
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.ConfigCheck(context.Background(), ConfigCheckOptions{WorkingDir: repoRoot})
+	if err == nil {
+		t.Fatal("expected config check failure")
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "Config parse failed: config references missing environment variable(s): ROOM_TEST_MISSING_CODEX_BINARY") {
+		t.Fatalf("expected missing-env note in:\n%s", joined)
+	}
+}

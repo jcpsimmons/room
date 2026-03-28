@@ -104,3 +104,37 @@ func TestConfigExplainsMissingFileDefaults(t *testing.T) {
 		t.Fatalf("expected default provider in:\n%s", joined)
 	}
 }
+
+func TestConfigReportsExpandedEnvironmentValues(t *testing.T) {
+	t.Setenv("ROOM_TEST_CODEX_BINARY", "codex-lab")
+	t.Setenv("ROOM_TEST_CODEX_MODEL", "gpt-5.4")
+
+	repoRoot := initGitRepo(t)
+	writeRepoFile(t, filepath.Join(repoRoot, "README.md"), "hello\n")
+	runGit(t, repoRoot, "add", "README.md")
+	runGit(t, repoRoot, "commit", "-m", "init")
+
+	writeRepoFile(t, filepath.Join(repoRoot, ".room", "config.toml"), `
+[codex]
+binary = "${ROOM_TEST_CODEX_BINARY}"
+model = "${ROOM_TEST_CODEX_MODEL}"
+`)
+
+	svc := NewService(Dependencies{
+		Git:     git.NewClient(),
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Config(context.Background(), ConfigOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{"Agent binary: codex-lab", "Codex model: gpt-5.4"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("config report missing %q in:\n%s", want, joined)
+		}
+	}
+}

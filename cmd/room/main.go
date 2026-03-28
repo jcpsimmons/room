@@ -416,6 +416,8 @@ func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions, noSou
 	if total <= 0 {
 		total = 1
 	}
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 
 	model := ui.NewRunModel(total, runUIOptions(noSound)...)
 	program := tea.NewProgram(
@@ -436,7 +438,7 @@ func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions, noSou
 	}
 
 	go func() {
-		report, err := svc.Run(ctx, opts)
+		report, err := svc.Run(runCtx, opts)
 		resultCh <- runResult{report: report, err: err}
 		time.Sleep(120 * time.Millisecond)
 		program.Quit()
@@ -444,7 +446,13 @@ func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions, noSou
 
 	_, uiErr := program.Run()
 	model.Shutdown()
-	result := <-resultCh
+	var result runResult
+	select {
+	case result = <-resultCh:
+	default:
+		cancelRun()
+		result = <-resultCh
+	}
 
 	renderErr := renderRun(result.report)
 	if uiErr != nil && !errors.Is(uiErr, tea.ErrProgramKilled) {

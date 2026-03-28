@@ -477,7 +477,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		execution.Stdout = ""
 		execution.Stderr = ""
 
-		if ctx.Err() != nil && !execution.TimedOut {
+		if shouldTreatExecutionAsInterrupted(ctx.Err(), execution, runErr) {
 			if manifestErr := writeBundleManifest(runDir, bundleModeInterrupted, existingArtifacts(runDir,
 				"prompt.txt",
 				"recipe.json",
@@ -851,6 +851,22 @@ func faultFragment(raw string) string {
 		return fragment
 	}
 	return strings.TrimSpace(fragment[len(fragment)-maxChars:])
+}
+
+func shouldTreatExecutionAsInterrupted(ctxErr error, execution agent.Execution, runErr error) bool {
+	if ctxErr == nil || execution.TimedOut || runErr == nil {
+		return false
+	}
+	if execution.Result != (agent.Result{}) {
+		return false
+	}
+	if execution.ExitCode != 0 || strings.TrimSpace(execution.ExitSignal) != "" {
+		return true
+	}
+	errText := strings.ToLower(runErr.Error())
+	return strings.Contains(errText, "context canceled") ||
+		strings.Contains(errText, "signal: killed") ||
+		strings.Contains(errText, "interrupt")
 }
 
 func summarizeRunFocusAreas(ctx context.Context, gitClient git.Client, repoRoot string) []string {

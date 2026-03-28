@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	toml "github.com/pelletier/go-toml/v2"
 )
+
+var envPlaceholderRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
 
 const (
 	RoomDirName            = ".room"
@@ -135,6 +140,10 @@ func Load(path string) (Config, error) {
 	decoder := toml.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cfg); err != nil {
+		return Config{}, err
+	}
+	cfg, err = expandEnvPlaceholders(cfg)
+	if err != nil {
 		return Config{}, err
 	}
 	cfg = cfg.Normalize()
@@ -296,4 +305,42 @@ func resolve(base, path string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Join(base, path)
+}
+
+func expandEnvPlaceholders(cfg Config) (Config, error) {
+	var missing []string
+	expand := func(value string) string {
+		return envPlaceholderRe.ReplaceAllStringFunc(value, func(match string) string {
+			pieces := envPlaceholderRe.FindStringSubmatch(match)
+			if len(pieces) < 2 {
+				return match
+			}
+			if resolved, ok := os.LookupEnv(pieces[1]); ok {
+				return resolved
+			}
+			if len(pieces) >= 3 && pieces[2] != "" {
+				return pieces[2]
+			}
+			missing = append(missing, pieces[1])
+			return match
+		})
+	}
+
+	cfg.Agent.Provider = expand(cfg.Agent.Provider)
+	cfg.Run.CommitPrefix = expand(cfg.Run.CommitPrefix)
+	cfg.Codex.Binary = expand(cfg.Codex.Binary)
+	cfg.Codex.Model = expand(cfg.Codex.Model)
+	cfg.Codex.Sandbox = expand(cfg.Codex.Sandbox)
+	cfg.Codex.Approval = expand(cfg.Codex.Approval)
+	cfg.Claude.Binary = expand(cfg.Claude.Binary)
+	cfg.Claude.Model = expand(cfg.Claude.Model)
+	cfg.Claude.PermissionMode = expand(cfg.Claude.PermissionMode)
+	cfg.Prompt.InstructionFile = expand(cfg.Prompt.InstructionFile)
+
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		missing = slices.Compact(missing)
+		return Config{}, fmt.Errorf("config references missing environment variable(s): %s", strings.Join(missing, ", "))
+	}
+	return cfg, nil
 }

@@ -1699,6 +1699,111 @@ func TestRunWritesProgressTraceArtifact(t *testing.T) {
 	}
 }
 
+func TestRunDoesNotMarkCompletedExecutionInterruptedAfterContextCancel(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runFn: func(_ context.Context, _ agent.Prompt, _ agent.Schema, _ agent.RunOptions, outputPath string) (agent.Execution, error) {
+			result := agent.Result{
+				Summary:         "Locked env expansion into config loading",
+				NextInstruction: "Probe model flag acceptance before launch",
+				Status:          "continue",
+				CommitMessage:   "expand config env placeholders",
+			}
+			data, err := json.Marshal(result)
+			if err != nil {
+				return agent.Execution{}, err
+			}
+			if err := os.WriteFile(outputPath, append(data, '\n'), 0o644); err != nil {
+				return agent.Execution{}, err
+			}
+			cancel()
+			return agent.Execution{
+				Result:     result,
+				Command:    []string{"codex", "exec"},
+				DurationMS: 50,
+			}, nil
+		},
+	}
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:     repoRoot,
+			dirtySeq: []bool{false},
+			diffSeq:  []string{""},
+			statsSeq: []git.DiffStats{{}},
+		},
+		Providers: testProviders(runner, nil),
+		Now:       time.Now,
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(ctx, RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d, want 1", report.CompletedIterations)
+	}
+	if report.LastStatus != "continue" {
+		t.Fatalf("last status = %q, want continue", report.LastStatus)
+	}
+
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if snapshot.LastStatus != "continue" {
+		t.Fatalf("state last status = %q, want continue", snapshot.LastStatus)
+	}
+
+	manifest, ok, _, err := readBundleManifest(report.LastRunDir)
+	if err != nil {
+		t.Fatalf("read bundle manifest: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected bundle manifest")
+	}
+	if manifest.Mode != bundleModeExecuted {
+		t.Fatalf("manifest mode = %q, want %q", manifest.Mode, bundleModeExecuted)
+	}
+}
+
+func TestShouldTreatExecutionAsInterrupted(t *testing.T) {
+	t.Run("completed result wins over canceled context", func(t *testing.T) {
+		got := shouldTreatExecutionAsInterrupted(context.Canceled, agent.Execution{
+			Result: agent.Result{Summary: "done"},
+		}, nil)
+		if got {
+			t.Fatal("expected completed execution to avoid interrupted classification")
+		}
+	})
+
+	t.Run("canceled execution with kill signal is interrupted", func(t *testing.T) {
+		got := shouldTreatExecutionAsInterrupted(context.Canceled, agent.Execution{
+			ExitCode:   137,
+			ExitSignal: "killed",
+		}, errors.New("codex execution failed: signal: killed"))
+		if !got {
+			t.Fatal("expected killed execution to be classified as interrupted")
+		}
+	})
+
+	t.Run("malformed successful output remains a failure", func(t *testing.T) {
+		got := shouldTreatExecutionAsInterrupted(context.Canceled, agent.Execution{}, errors.New("codex did not write a final message"))
+		if got {
+			t.Fatal("expected malformed output to remain a normal failure")
+		}
+	})
+}
+
 func prepareInitializedRepo(t *testing.T, repoRoot string) (config.Config, config.Paths) {
 	t.Helper()
 
