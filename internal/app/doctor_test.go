@@ -283,6 +283,43 @@ func TestDoctorSurfacesMalformedSummaryHistory(t *testing.T) {
 	}
 }
 
+func TestDoctorSurfacesSchemaContractDrift(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.SchemaPath, []byte("{\"type\":\"object\",\"title\":\"stale\"}\n"), 0o644); err != nil {
+		t.Fatalf("write schema drift: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "schema" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected schema drift to fail, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "drifted from this ROOM build") {
+			t.Fatalf("unexpected schema check: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected schema check, got %#v", report.Checks)
+	}
+}
+
 func TestDoctorFlagsBlankInstructionFile(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

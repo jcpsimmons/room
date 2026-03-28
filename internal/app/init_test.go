@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/prompt"
 	"github.com/jcpsimmons/room/internal/state"
@@ -153,6 +154,39 @@ func TestInitPinsRoomStateIntoWorktreeExclude(t *testing.T) {
 
 	if !containsLine(report.Lines, "Added `.room/` to the git exclude file so plain `git status` stays quiet.") {
 		t.Fatalf("expected exclude note in report lines: %#v", report.Lines)
+	}
+}
+
+func TestInitRefreshesDriftedSchemaContract(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	writeRepoFile(t, filepath.Join(repoRoot, "README.md"), "hello\n")
+	runGit(t, repoRoot, "add", "README.md")
+	runGit(t, repoRoot, "commit", "-m", "init")
+
+	roomDir := filepath.Join(repoRoot, ".room")
+	if err := os.MkdirAll(roomDir, 0o755); err != nil {
+		t.Fatalf("mkdir room: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(roomDir, "schema.json"), []byte("{\"type\":\"object\",\"title\":\"stale\"}\n"), 0o644); err != nil {
+		t.Fatalf("write stale schema: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     git.NewClient(),
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+	})
+
+	if _, err := svc.Init(context.Background(), InitOptions{WorkingDir: repoRoot}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(roomDir, "schema.json"))
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	if string(data) != string(agent.DefaultSchema()) {
+		t.Fatal("init did not refresh schema.json to the embedded contract")
 	}
 }
 

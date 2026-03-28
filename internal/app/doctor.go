@@ -124,9 +124,6 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		if !fsutil.FileExists(paths.InstructionPath) {
 			problems = append(problems, "missing instruction.txt")
 		}
-		if !fsutil.FileExists(paths.SchemaPath) {
-			problems = append(problems, "missing schema.json")
-		}
 		if !fsutil.FileExists(paths.StatePath) {
 			problems = append(problems, "missing state.json")
 		} else if _, err := state.Load(paths.StatePath); err != nil {
@@ -139,6 +136,17 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		}
 	} else {
 		checks = append(checks, DoctorCheck{Name: "state", OK: true, Message: "ROOM is not initialized yet; `room init` will create state files"})
+	}
+	if schemaSignal, err := inspectSchemaContract(paths.SchemaPath); err != nil {
+		checks = append(checks, DoctorCheck{Name: "schema", OK: false, Message: fmt.Sprintf("schema contract read failed: %v", err)})
+	} else {
+		schemaHint := schemaContractHint(schemaSignal, paths.SchemaPath)
+		switch schemaSignal.Status {
+		case schemaContractCurrent:
+			checks = append(checks, DoctorCheck{Name: "schema", OK: true, Message: schemaHint})
+		default:
+			checks = append(checks, DoctorCheck{Name: "schema", OK: false, Message: schemaHint})
+		}
 	}
 	if instruction, err := loadInstructionSignal(paths.InstructionPath); err != nil {
 		checks = append(checks, DoctorCheck{Name: "instruction", OK: false, Message: fmt.Sprintf("instruction read failed: %v", err)})

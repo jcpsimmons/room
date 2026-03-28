@@ -1417,6 +1417,78 @@ func TestRunEmitsAgentExecutionPulseDuringLongRuns(t *testing.T) {
 	}
 }
 
+func TestRunRefreshesDriftedSchemaContract(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.SchemaPath, []byte("{\"type\":\"object\",\"title\":\"stale\"}\n"), 0o644); err != nil {
+		t.Fatalf("write stale schema: %v", err)
+	}
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runFn: func(_ context.Context, _ agent.Prompt, schema agent.Schema, _ agent.RunOptions, outputPath string) (agent.Execution, error) {
+			data, err := os.ReadFile(schema.Path)
+			if err != nil {
+				return agent.Execution{}, err
+			}
+			if string(data) != string(agent.DefaultSchema()) {
+				t.Fatalf("schema file was not refreshed before run")
+			}
+			result := agent.Result{
+				Summary:         "Locked schema drift",
+				NextInstruction: "Route to a fresh subsystem",
+				Status:          "continue",
+				CommitMessage:   "lock schema drift",
+			}
+			data, err = json.Marshal(result)
+			if err != nil {
+				return agent.Execution{}, err
+			}
+			if err := os.WriteFile(outputPath, append(data, '\n'), 0o644); err != nil {
+				return agent.Execution{}, err
+			}
+			return agent.Execution{
+				Result:     result,
+				Command:    []string{"codex", "exec"},
+				DurationMS: 1250,
+			}, nil
+		},
+	}
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:         repoRoot,
+			dirtySeq:     []bool{false},
+			diffSeq:      []string{""},
+			statsSeq:     []git.DiffStats{{}},
+			commitHashes: []string{"abc123"},
+		},
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	refreshed, err := os.ReadFile(paths.SchemaPath)
+	if err != nil {
+		t.Fatalf("read refreshed schema: %v", err)
+	}
+	if string(refreshed) != string(agent.DefaultSchema()) {
+		t.Fatal("schema.json was not refreshed to the embedded contract")
+	}
+}
+
 func prepareInitializedRepo(t *testing.T, repoRoot string) (config.Config, config.Paths) {
 	t.Helper()
 

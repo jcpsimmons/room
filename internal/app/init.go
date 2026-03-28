@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/config"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/prompt"
@@ -58,10 +57,8 @@ func (s *Service) Init(ctx context.Context, opts InitOptions) (InitReport, error
 		}
 		wroteInstruction = true
 	}
-	if !fsutil.FileExists(paths.SchemaPath) {
-		if err := agent.WriteSchema(paths.SchemaPath); err != nil {
-			return InitReport{}, err
-		}
+	if _, err := syncSchemaContract(paths.SchemaPath); err != nil {
+		return InitReport{}, err
 	}
 	if !fsutil.FileExists(paths.StatePath) {
 		currentInstruction, err := requireInstructionSignal(paths.InstructionPath)

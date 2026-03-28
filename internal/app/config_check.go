@@ -21,6 +21,7 @@ type ConfigCheckReport struct {
 	ConfigExists bool          `json:"config_exists"`
 	Config       config.Config `json:"config"`
 	Paths        config.Paths  `json:"paths"`
+	SchemaHint   string        `json:"schema_hint,omitempty"`
 	Lines        []string      `json:"lines"`
 }
 
@@ -77,6 +78,14 @@ func (s *Service) ConfigCheck(ctx context.Context, opts ConfigCheckOptions) (Con
 		fmt.Sprintf("Provider: %s", agent.DisplayName(cfg.Agent.Provider)),
 		fmt.Sprintf("Runs dir: %s", paths.RunsDir),
 	}
+	schemaSignal, err := inspectSchemaContract(paths.SchemaPath)
+	if err != nil {
+		return ConfigCheckReport{}, err
+	}
+	schemaHint := schemaContractHint(schemaSignal, paths.SchemaPath)
+	if schemaHint != "" {
+		lines = append(lines, fmt.Sprintf("Schema contract: %s", schemaHint))
+	}
 
 	return ConfigCheckReport{
 		RepoRoot:     repoRoot,
@@ -84,6 +93,7 @@ func (s *Service) ConfigCheck(ctx context.Context, opts ConfigCheckOptions) (Con
 		ConfigExists: fsutil.FileExists(paths.ConfigPath),
 		Config:       cfg,
 		Paths:        paths,
+		SchemaHint:   schemaHint,
 		Lines:        lines,
 	}, nil
 }
