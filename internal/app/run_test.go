@@ -216,6 +216,17 @@ func TestRunUsesCombinedDiffAndStats(t *testing.T) {
 	if report.CompletedIterations != 1 {
 		t.Fatalf("completed iterations = %d", report.CompletedIterations)
 	}
+	data, err := os.ReadFile(filepath.Join(report.LastRunDir, "recipe.json"))
+	if err != nil {
+		t.Fatalf("read recipe artifact: %v", err)
+	}
+	var recipe recipeArtifact
+	if err := json.Unmarshal(data, &recipe); err != nil {
+		t.Fatalf("unmarshal recipe artifact: %v", err)
+	}
+	if recipe.Provider != "codex" || recipe.Binary != "codex" || recipe.ConfigPath == "" || recipe.InstructionPath == "" {
+		t.Fatalf("recipe artifact = %#v", recipe)
+	}
 	if fakeGit.bundleCalls != 1 {
 		t.Fatalf("expected combined diff/stat call, got %d", fakeGit.bundleCalls)
 	}
@@ -1163,7 +1174,7 @@ func TestRunSurfacesClaudeWrapperDrift(t *testing.T) {
 	for _, artifact := range manifest.Artifacts {
 		gotArtifacts = append(gotArtifacts, artifact.Name)
 	}
-	wantArtifacts := []string{"execution.json", "progress.jsonl", "prompt.txt", "stderr.log", "stdout.log"}
+	wantArtifacts := []string{"execution.json", "progress.jsonl", "prompt.txt", "recipe.json", "stderr.log", "stdout.log"}
 	if strings.Join(gotArtifacts, ",") != strings.Join(wantArtifacts, ",") {
 		t.Fatalf("manifest artifacts = %#v", gotArtifacts)
 	}

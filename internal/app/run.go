@@ -338,6 +338,10 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		if err := fsutil.AtomicWriteFile(promptPath, []byte(promptBody), 0o644); err != nil {
 			return RunReport{}, err
 		}
+		recipePath := filepath.Join(runDir, "recipe.json")
+		if err := writeRecipeArtifact(recipePath, cfg, paths, provider, model, commitEnabled, commitPrefix, prepared.stats); err != nil {
+			return RunReport{}, err
+		}
 
 		snapshot.CurrentIteration = nextIteration
 		snapshot.LastRunDirectory = runDir
@@ -375,7 +379,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if err := appendProgressArtifact(progressPath, successEvent); err != nil {
 				return RunReport{}, err
 			}
-			if err := writeBundleManifest(runDir, bundleModeDryRun, existingArtifacts(runDir, "prompt.txt", "progress.jsonl"), lockRecovery); err != nil {
+			if err := writeBundleManifest(runDir, bundleModeDryRun, existingArtifacts(runDir, "prompt.txt", "recipe.json", "progress.jsonl"), lockRecovery); err != nil {
 				return RunReport{}, err
 			}
 			if !opts.UntilDone {
@@ -476,6 +480,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		if ctx.Err() != nil && !execution.TimedOut {
 			if manifestErr := writeBundleManifest(runDir, bundleModeInterrupted, existingArtifacts(runDir,
 				"prompt.txt",
+				"recipe.json",
 				"execution.json",
 				"progress.jsonl",
 				"stdout.log",
@@ -505,6 +510,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		if runErr != nil {
 			if manifestErr := writeBundleManifest(runDir, bundleModeFailed, existingArtifacts(runDir,
 				"prompt.txt",
+				"recipe.json",
 				"execution.json",
 				"progress.jsonl",
 				"stdout.log",
@@ -676,6 +682,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		}
 		if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
 			"prompt.txt",
+			"recipe.json",
 			"execution.json",
 			"progress.jsonl",
 			"stdout.log",

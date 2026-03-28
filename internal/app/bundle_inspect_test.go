@@ -33,6 +33,19 @@ diff --git a/a.txt b/a.txt
 +new
 `))
 	writeExecutionArtifactForTest(t, runDir, 2500, false, 0, "", "")
+	writeRecipeArtifactForTest(t, runDir, recipeArtifact{
+		Provider:        "codex",
+		Model:           "gpt-5.4",
+		Binary:          "codex",
+		CommitEnabled:   true,
+		ConfigPath:      filepath.Join(repoRoot, ".room", "config.toml"),
+		InstructionPath: filepath.Join(repoRoot, ".room", "instruction.txt"),
+		SchemaPath:      filepath.Join(repoRoot, ".room", "schema.json"),
+		TimeoutSeconds:  1800,
+		Sandbox:         "danger-full-access",
+		Approval:        "never",
+		PromptStats:     promptStatsFixture(),
+	})
 	writeProgressArtifactForTest(t, runDir,
 		progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationStart, EventAt: time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC), Status: "running"}},
 		progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseAgentExecutionPulse, EventAt: time.Date(2026, 3, 25, 11, 0, 1, 0, time.UTC), Status: "running", ExecutionElapsedMS: 1000, RunElapsedMS: 1000}},
@@ -81,6 +94,9 @@ diff --git a/a.txt b/a.txt
 	if report.Execution == nil {
 		t.Fatal("expected execution details")
 	}
+	if report.Recipe == nil || report.Recipe.Model != "gpt-5.4" {
+		t.Fatalf("recipe = %#v", report.Recipe)
+	}
 	if report.Progress == nil || report.Progress.EventCount != 3 || report.Progress.PulseCount != 1 {
 		t.Fatalf("progress report = %#v", report.Progress)
 	}
@@ -96,6 +112,9 @@ diff --git a/a.txt b/a.txt
 		"ROOM bundle",
 		"Bundle dir: " + runDir,
 		"Bundle integrity: verified",
+		"Recipe:",
+		"provider: codex",
+		"model: gpt-5.4",
 		"duration: 2.5s (2500 ms)",
 		"timed out: false",
 		"exit: 0",

@@ -12,6 +12,7 @@ import (
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/fsutil"
 	"github.com/jcpsimmons/room/internal/git"
+	"github.com/jcpsimmons/room/internal/prompt"
 	"github.com/jcpsimmons/room/internal/version"
 )
 
@@ -46,6 +47,19 @@ diff --git a/b.txt b/b.txt
 +fresh
 `))
 		writeExecutionArtifactForTest(t, filepath.Join(paths.RunsDir, "0002"), 1250, true, 124, "alarm clock", "provider timed out after waiting on the void")
+		writeRecipeArtifactForTest(t, filepath.Join(paths.RunsDir, "0002"), recipeArtifact{
+			Provider:        "codex",
+			Model:           "gpt-5.4",
+			Binary:          "codex",
+			CommitEnabled:   true,
+			ConfigPath:      filepath.Join(repoRoot, ".room", "config.toml"),
+			InstructionPath: filepath.Join(repoRoot, ".room", "instruction.txt"),
+			SchemaPath:      filepath.Join(repoRoot, ".room", "schema.json"),
+			TimeoutSeconds:  1800,
+			Sandbox:         "danger-full-access",
+			Approval:        "never",
+			PromptStats:     promptStatsFixture(),
+		})
 		writeProgressArtifactForTest(t, filepath.Join(paths.RunsDir, "0002"),
 			progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationStart, EventAt: time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC), Status: "running"}},
 			progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseAgentExecutionPulse, EventAt: time.Date(2026, 3, 25, 11, 0, 1, 0, time.UTC), Status: "running", ExecutionElapsedMS: 1000, RunElapsedMS: 1000}},
@@ -74,9 +88,16 @@ diff --git a/b.txt b/b.txt
 		if report.Progress == nil || report.Progress.EventCount != 3 || report.Progress.PulseCount != 1 || report.Progress.LastPhase != string(RunProgressPhaseIterationSuccess) {
 			t.Fatalf("progress = %#v", report.Progress)
 		}
+		if report.Recipe == nil || report.Recipe.Model != "gpt-5.4" || report.Recipe.Binary != "codex" {
+			t.Fatalf("recipe = %#v", report.Recipe)
+		}
 		joined := strings.Join(report.Lines, "\n")
 		for _, want := range []string{
 			"Latest ROOM bundle: " + filepath.Join(paths.RunsDir, "0002"),
+			"Recipe:",
+			"provider: codex",
+			"model: gpt-5.4",
+			"sandbox: danger-full-access",
 			"duration: 1.25s (1250 ms)",
 			"timed out: true",
 			"exit: 124 (alarm clock)",
@@ -343,6 +364,29 @@ func writeExecutionArtifactForTest(t *testing.T, runDir string, durationMS int64
 	}
 	if err := os.WriteFile(filepath.Join(runDir, "execution.json"), append(data, '\n'), 0o644); err != nil {
 		t.Fatalf("write execution artifact: %v", err)
+	}
+}
+
+func writeRecipeArtifactForTest(t *testing.T, runDir string, artifact recipeArtifact) {
+	t.Helper()
+
+	data, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatalf("marshal recipe artifact: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "recipe.json"), append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("write recipe artifact: %v", err)
+	}
+}
+
+func promptStatsFixture() prompt.BuildReport {
+	return prompt.BuildReport{
+		TotalRunes:             1234,
+		RecentSummariesCount:   4,
+		PriorInstructionsCount: 6,
+		RecentCommitsCount:     3,
+		GitStatusClipped:       true,
+		GitStatusOmittedLines:  2,
 	}
 }
 

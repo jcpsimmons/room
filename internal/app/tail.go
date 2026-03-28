@@ -29,6 +29,7 @@ type TailReport struct {
 	BundleIntegrity      string                `json:"bundle_integrity,omitempty"`
 	BundleRecovery       string                `json:"bundle_recovery,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint `json:"bundle_integrity_hints,omitempty"`
+	Recipe               *RecipeReport         `json:"recipe,omitempty"`
 	Execution            *ExecutionReport      `json:"execution,omitempty"`
 	Progress             *ProgressReport       `json:"progress,omitempty"`
 	Prompt               string                `json:"prompt"`
@@ -83,6 +84,13 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if progressWarn != nil {
 		appendArtifactDecodeWarning(&assessment, "newest bundle", "progress.jsonl", progressWarn)
 	}
+	recipe, hasRecipe, recipeWarn, err := readRecipeArtifactLenient(filepath.Join(runDir, "recipe.json"))
+	if err != nil {
+		return TailReport{}, err
+	}
+	if recipeWarn != nil {
+		appendArtifactDecodeWarning(&assessment, "newest bundle", "recipe.json", recipeWarn)
+	}
 	stats, hasStats, err := readTailDiffStats(filepath.Join(runDir, "diff.patch"))
 	if err != nil {
 		return TailReport{}, err
@@ -102,6 +110,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if assessment.Recovery != "" {
 		lines = append(lines, fmt.Sprintf("Stale-lock recovery: %s", assessment.Recovery))
 	}
+	lines = append(lines, recipeLines(recipe, hasRecipe)...)
 	lines = append(lines, executionLines(execution, hasExecution)...)
 	lines = append(lines, progressLines(progress, hasProgress)...)
 	lines = append(lines,
@@ -143,6 +152,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		BundleIntegrity:      assessment.Integrity,
 		BundleRecovery:       assessment.Recovery,
 		BundleIntegrityHints: assessment.Hints,
+		Recipe:               recipeReportIfPresent(recipe, hasRecipe),
 		Execution:            executionReportIfPresent(execution, hasExecution),
 		Progress:             progressReportIfPresent(progress, hasProgress),
 		Prompt:               strings.TrimSpace(string(promptBody)),

@@ -28,6 +28,7 @@ type BundleReport struct {
 	BundleIntegrity      string                 `json:"bundle_integrity,omitempty"`
 	BundleHint           string                 `json:"bundle_hint,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint  `json:"bundle_integrity_hints,omitempty"`
+	Recipe               *RecipeReport          `json:"recipe,omitempty"`
 	Execution            *ExecutionReport       `json:"execution,omitempty"`
 	Progress             *ProgressReport        `json:"progress,omitempty"`
 	ManifestOK           bool                   `json:"manifest_ok"`
@@ -90,6 +91,13 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	if progressWarn != nil {
 		appendArtifactDecodeWarning(&assessment, "bundle", "progress.jsonl", progressWarn)
 	}
+	recipe, hasRecipe, recipeWarn, err := readRecipeArtifactLenient(filepath.Join(runDir, "recipe.json"))
+	if err != nil {
+		return BundleReport{}, err
+	}
+	if recipeWarn != nil {
+		appendArtifactDecodeWarning(&assessment, "bundle", "recipe.json", recipeWarn)
+	}
 
 	report := BundleReport{
 		RepoRoot:             repoRoot,
@@ -99,6 +107,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 		BundleIntegrity:      assessment.Integrity,
 		BundleHint:           assessment.Hint,
 		BundleIntegrityHints: assessment.Hints,
+		Recipe:               recipeReportIfPresent(recipe, hasRecipe),
 		Execution:            executionReportIfPresent(execution, hasExecution),
 		Progress:             progressReportIfPresent(progress, hasProgress),
 		ManifestOK:           manifestOK && assessment.ManifestOK,
@@ -132,6 +141,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	if len(report.BundleIntegrityHints) > 0 {
 		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(report.BundleIntegrityHints)))
 	}
+	lines = append(lines, recipeLines(recipe, hasRecipe)...)
 	lines = append(lines, executionLines(execution, hasExecution)...)
 	lines = append(lines, progressLines(progress, hasProgress)...)
 	if manifestOK {
