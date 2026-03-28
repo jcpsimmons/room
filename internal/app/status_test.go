@@ -115,7 +115,7 @@ diff --git a/a.txt b/a.txt
 +old
 +new
 `))
-	writeExecutionArtifactForTest(t, runDir, 900, false, "")
+	writeExecutionArtifactForTest(t, runDir, 900, false, 0, "", "")
 	for _, name := range []string{"stdout.log", "stderr.log"} {
 		if err := os.WriteFile(filepath.Join(runDir, name), nil, 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)

@@ -70,6 +70,8 @@ type RunProgressEvent struct {
 	CommitMessage       string           `json:"commit_message"`
 	StdoutFragment      string           `json:"stdout_fragment,omitempty"`
 	StderrFragment      string           `json:"stderr_fragment,omitempty"`
+	ExitCode            int              `json:"exit_code,omitempty"`
+	ExitSignal          string           `json:"exit_signal,omitempty"`
 	DryRun              bool             `json:"dry_run"`
 	CommitEnabled       bool             `json:"commit_enabled"`
 	Err                 error            `json:"-"`
@@ -492,6 +494,8 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				Status:              "failed",
 				StdoutFragment:      faultFragment(execution.Stdout),
 				StderrFragment:      faultFragment(execution.Stderr),
+				ExitCode:            execution.ExitCode,
+				ExitSignal:          execution.ExitSignal,
 				Err:                 runErr,
 				CommitEnabled:       commitEnabled,
 				StartedAt:           startedAt.UTC(),

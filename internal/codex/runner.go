@@ -72,6 +72,7 @@ func (CLI) Run(ctx context.Context, prompt Prompt, schema Schema, opts RunOption
 		DurationMS: duration.Milliseconds(),
 		TimedOut:   errors.Is(runCtx.Err(), context.DeadlineExceeded),
 	}
+	execution.ExitCode, execution.ExitSignal = agent.CaptureExitMetadata(err)
 	if len(outBytes) > 0 {
 		result, parseErr := ParseResult(outBytes)
 		if parseErr != nil {

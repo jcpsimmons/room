@@ -17,6 +17,8 @@ type executionArtifact struct {
 	Command    []string      `json:"command"`
 	DurationMS int64         `json:"duration_ms"`
 	TimedOut   bool          `json:"timed_out"`
+	ExitCode   int           `json:"exit_code,omitempty"`
+	ExitSignal string        `json:"exit_signal,omitempty"`
 	Error      string        `json:"error,omitempty"`
 	Result     *agent.Result `json:"result,omitempty"`
 }
@@ -24,6 +26,8 @@ type executionArtifact struct {
 type ExecutionReport struct {
 	DurationMS int64  `json:"duration_ms"`
 	TimedOut   bool   `json:"timed_out"`
+	ExitCode   int    `json:"exit_code,omitempty"`
+	ExitSignal string `json:"exit_signal,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
 
@@ -35,6 +39,8 @@ func writeExecutionArtifact(path, provider string, execution agent.Execution, st
 		Command:    execution.Command,
 		DurationMS: execution.DurationMS,
 		TimedOut:   execution.TimedOut,
+		ExitCode:   execution.ExitCode,
+		ExitSignal: strings.TrimSpace(execution.ExitSignal),
 	}
 	if runErr != nil {
 		artifact.Error = strings.TrimSpace(runErr.Error())
@@ -91,6 +97,8 @@ func executionReportIfPresent(artifact *executionArtifact, ok bool) *ExecutionRe
 	return &ExecutionReport{
 		DurationMS: artifact.DurationMS,
 		TimedOut:   artifact.TimedOut,
+		ExitCode:   artifact.ExitCode,
+		ExitSignal: strings.TrimSpace(artifact.ExitSignal),
 		Error:      strings.TrimSpace(artifact.Error),
 	}
 }
@@ -104,6 +112,7 @@ func executionLines(artifact *executionArtifact, ok bool) []string {
 	lines = append(lines,
 		indent(fmt.Sprintf("duration: %s (%d ms)", time.Duration(artifact.DurationMS)*time.Millisecond, artifact.DurationMS)),
 		indent(fmt.Sprintf("timed out: %t", artifact.TimedOut)),
+		indent(fmt.Sprintf("exit: %s", formatExecutionExit(artifact.ExitCode, artifact.ExitSignal))),
 	)
 	if strings.TrimSpace(artifact.Error) != "" {
 		lines = append(lines, indent(fmt.Sprintf("error: %s", strings.TrimSpace(artifact.Error))))
@@ -111,4 +120,18 @@ func executionLines(artifact *executionArtifact, ok bool) []string {
 		lines = append(lines, indent("error: none"))
 	}
 	return lines
+}
+
+func formatExecutionExit(code int, signal string) string {
+	signal = strings.TrimSpace(signal)
+	switch {
+	case signal != "" && code != 0:
+		return fmt.Sprintf("%d (%s)", code, signal)
+	case signal != "":
+		return signal
+	case code != 0:
+		return fmt.Sprintf("%d", code)
+	default:
+		return "0"
+	}
 }

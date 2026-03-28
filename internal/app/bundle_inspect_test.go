@@ -31,7 +31,7 @@ diff --git a/a.txt b/a.txt
 +old
 +new
 `))
-	writeExecutionArtifactForTest(t, runDir, 2500, false, "")
+	writeExecutionArtifactForTest(t, runDir, 2500, false, 0, "", "")
 	if err := os.WriteFile(filepath.Join(runDir, "stdout.log"), []byte("stdout\n"), 0o644); err != nil {
 		t.Fatalf("write stdout: %v", err)
 	}
@@ -74,7 +74,7 @@ diff --git a/a.txt b/a.txt
 	if report.Execution == nil {
 		t.Fatal("expected execution details")
 	}
-	if report.Execution.DurationMS != 2500 || report.Execution.TimedOut || report.Execution.Error != "" {
+	if report.Execution.DurationMS != 2500 || report.Execution.TimedOut || report.Execution.ExitCode != 0 || report.Execution.ExitSignal != "" || report.Execution.Error != "" {
 		t.Fatalf("execution report = %#v", report.Execution)
 	}
 	if len(report.Artifacts) != 6 {
@@ -88,6 +88,7 @@ diff --git a/a.txt b/a.txt
 		"Bundle integrity: verified",
 		"duration: 2.5s (2500 ms)",
 		"timed out: false",
+		"exit: 0",
 		"Manifest artifacts:",
 		"prompt.txt",
 		"result.json",
@@ -221,7 +222,7 @@ func TestBundleInspectsFailedManifestedRun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(runDir, "prompt.txt"), []byte("failed prompt\n"), 0o644); err != nil {
 		t.Fatalf("write prompt: %v", err)
 	}
-	writeExecutionArtifactForTest(t, runDir, 900, false, "claude wrapper drift detected")
+	writeExecutionArtifactForTest(t, runDir, 900, false, 9, "killed", "claude wrapper drift detected")
 	if err := os.WriteFile(filepath.Join(runDir, "stdout.log"), []byte("stdout fragment\n"), 0o644); err != nil {
 		t.Fatalf("write stdout: %v", err)
 	}

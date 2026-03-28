@@ -510,10 +510,14 @@ func formatRunProgress(event app.RunProgressEvent) []string {
 		}
 		return []string{fmt.Sprintf("Iteration %d [%s]: %s", event.Iteration, event.Status, detail)}
 	case app.RunProgressPhaseIterationFailure:
-		if errors.Is(event.Err, claude.ErrMalformedOutputEnvelope) {
-			return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, errorText(event.Err, "Claude wrapper drift detected"))}
+		failureText := errorText(event.Err, "agent execution failed")
+		if exit := formatProgressExit(event); exit != "" {
+			failureText = fmt.Sprintf("%s [%s]", failureText, exit)
 		}
-		return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, errorText(event.Err, "agent execution failed"))}
+		if errors.Is(event.Err, claude.ErrMalformedOutputEnvelope) {
+			return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, failureText)}
+		}
+		return []string{fmt.Sprintf("Iteration %d failed: %s", event.Iteration, failureText)}
 	case app.RunProgressPhaseRunFinish:
 		if event.Err != nil {
 			if errors.Is(event.Err, claude.ErrMalformedOutputEnvelope) {
@@ -613,7 +617,7 @@ func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
 	case app.RunProgressPhaseIterationFailure:
 		out.Kind = ui.ProgressFailure
 		out.Title = fmt.Sprintf("step %d overloaded", event.Iteration)
-		out.Detail = errorText(event.Err, "signal clipped")
+		out.Detail = formatProgressFailureDetail(event)
 	case app.RunProgressPhaseRunFinish:
 		switch {
 		case event.Err != nil:
@@ -662,6 +666,27 @@ func formatHeartbeatDuration(ms int64) string {
 		ms = 0
 	}
 	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
+}
+
+func formatProgressFailureDetail(event app.RunProgressEvent) string {
+	detail := errorText(event.Err, "signal clipped")
+	if exit := formatProgressExit(event); exit != "" {
+		return fmt.Sprintf("%s [%s]", detail, exit)
+	}
+	return detail
+}
+
+func formatProgressExit(event app.RunProgressEvent) string {
+	switch {
+	case strings.TrimSpace(event.ExitSignal) != "" && event.ExitCode != 0:
+		return fmt.Sprintf("exit %d via %s", event.ExitCode, strings.TrimSpace(event.ExitSignal))
+	case strings.TrimSpace(event.ExitSignal) != "":
+		return fmt.Sprintf("signal %s", strings.TrimSpace(event.ExitSignal))
+	case event.ExitCode != 0:
+		return fmt.Sprintf("exit %d", event.ExitCode)
+	default:
+		return ""
+	}
 }
 
 func renderInit(report app.InitReport) error {

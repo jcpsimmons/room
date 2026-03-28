@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
+	"syscall"
 )
 
 var errMalformedJSON = errors.New("malformed ROOM JSON result")
@@ -25,6 +27,28 @@ type Execution struct {
 	Command    []string `json:"command"`
 	DurationMS int64    `json:"duration_ms"`
 	TimedOut   bool     `json:"timed_out"`
+	ExitCode   int      `json:"exit_code,omitempty"`
+	ExitSignal string   `json:"exit_signal,omitempty"`
+}
+
+func CaptureExitMetadata(err error) (int, string) {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return 0, ""
+	}
+	if exitErr.ProcessState == nil {
+		return 0, ""
+	}
+
+	exitCode := exitErr.ProcessState.ExitCode()
+	waitStatus, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok {
+		return exitCode, ""
+	}
+	if waitStatus.Signaled() {
+		return exitCode, waitStatus.Signal().String()
+	}
+	return exitCode, ""
 }
 
 func ParseResult(raw []byte) (Result, error) {

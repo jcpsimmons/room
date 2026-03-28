@@ -31,10 +31,12 @@ type fakeRunner struct {
 }
 
 type fakeRun struct {
-	result agent.Result
-	stdout string
-	stderr string
-	err    error
+	result     agent.Result
+	stdout     string
+	stderr     string
+	err        error
+	exitCode   int
+	exitSignal string
 }
 
 func (f *fakeRunner) Version(ctx context.Context, binary string) (string, error) {
@@ -71,6 +73,8 @@ func (f *fakeRunner) Run(ctx context.Context, prompt agent.Prompt, schema agent.
 		Stderr:     run.stderr,
 		Command:    []string{"codex", "exec"},
 		DurationMS: 1250,
+		ExitCode:   run.exitCode,
+		ExitSignal: run.exitSignal,
 	}, run.err
 }
 
@@ -773,7 +777,9 @@ func TestRunEmitsProgressEventsOnFailure(t *testing.T) {
 	runner := &fakeRunner{
 		version: "codex-cli 0.116.0",
 		runs: []fakeRun{{
-			err: errors.New("malformed codex JSON"),
+			err:        errors.New("malformed codex JSON"),
+			exitCode:   137,
+			exitSignal: "killed",
 		}},
 	}
 	fakeGit := &fakeGit{
@@ -820,6 +826,9 @@ func TestRunEmitsProgressEventsOnFailure(t *testing.T) {
 	}
 	if events[3].Err == nil || events[3].Err.Error() != "malformed codex JSON" {
 		t.Fatalf("failure error = %#v", events[3].Err)
+	}
+	if events[3].ExitCode != 137 || events[3].ExitSignal != "killed" {
+		t.Fatalf("failure exit metadata = %#v", events[3])
 	}
 	if events[4].Err == nil {
 		t.Fatalf("run finish should report the terminal error")

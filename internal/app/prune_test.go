@@ -296,7 +296,7 @@ func TestPruneKeepsNewestVerifiedRecoveryBundleWhenNewerTapeDrifts(t *testing.T)
 		CommitMessage:   "two",
 	}, "")
 	runDir0002 := filepath.Join(paths.RunsDir, "0002")
-	writeExecutionArtifactForTest(t, runDir0002, 1200, false, "")
+	writeExecutionArtifactForTest(t, runDir0002, 1200, false, 0, "", "")
 	if err := os.WriteFile(filepath.Join(runDir0002, "stdout.log"), []byte("stdout\n"), 0o644); err != nil {
 		t.Fatalf("write stdout: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestPruneSkipsRecoveryAnchorWhenNewestBundleIsVerified(t *testing.T) {
 		CommitMessage:   "two",
 	}, "")
 	runDir0002 := filepath.Join(paths.RunsDir, "0002")
-	writeExecutionArtifactForTest(t, runDir0002, 900, false, "")
+	writeExecutionArtifactForTest(t, runDir0002, 900, false, 0, "", "")
 	if err := os.WriteFile(filepath.Join(runDir0002, "stdout.log"), []byte("stdout\n"), 0o644); err != nil {
 		t.Fatalf("write stdout: %v", err)
 	}

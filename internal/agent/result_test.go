@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -48,5 +49,20 @@ func TestParseResultRejectsWrapperNoiseWithoutCompleteJSONObject(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "complete JSON object") {
 		t.Fatalf("expected extraction failure in error, got %v", err)
+	}
+}
+
+func TestCaptureExitMetadataReadsExitCode(t *testing.T) {
+	t.Parallel()
+
+	cmd := exec.Command("sh", "-c", "exit 7")
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected shell exit")
+	}
+
+	code, signal := CaptureExitMetadata(err)
+	if code != 7 || signal != "" {
+		t.Fatalf("CaptureExitMetadata() = (%d, %q), want (7, \"\")", code, signal)
 	}
 }

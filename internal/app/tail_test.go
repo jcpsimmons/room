@@ -45,7 +45,7 @@ diff --git a/b.txt b/b.txt
 @@ -0,0 +1 @@
 +fresh
 `))
-		writeExecutionArtifactForTest(t, filepath.Join(paths.RunsDir, "0002"), 1250, true, "provider timed out after waiting on the void")
+		writeExecutionArtifactForTest(t, filepath.Join(paths.RunsDir, "0002"), 1250, true, 124, "alarm clock", "provider timed out after waiting on the void")
 
 		report, err := svc.Tail(context.Background(), TailOptions{WorkingDir: repoRoot})
 		if err != nil {
@@ -71,6 +71,7 @@ diff --git a/b.txt b/b.txt
 			"Latest ROOM bundle: " + filepath.Join(paths.RunsDir, "0002"),
 			"duration: 1.25s (1250 ms)",
 			"timed out: true",
+			"exit: 124 (alarm clock)",
 			"error: provider timed out after waiting on the void",
 			"summary: Signal locked in",
 			"status: continue",
@@ -293,7 +294,7 @@ func writeTailBundle(t *testing.T, runsDir, name, prompt string, result *agent.R
 	}
 }
 
-func writeExecutionArtifactForTest(t *testing.T, runDir string, durationMS int64, timedOut bool, errText string) {
+func writeExecutionArtifactForTest(t *testing.T, runDir string, durationMS int64, timedOut bool, exitCode int, exitSignal, errText string) {
 	t.Helper()
 
 	startedAt := time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC)
@@ -303,6 +304,8 @@ func writeExecutionArtifactForTest(t *testing.T, runDir string, durationMS int64
 		FinishedAt: startedAt.Add(time.Duration(durationMS) * time.Millisecond),
 		DurationMS: durationMS,
 		TimedOut:   timedOut,
+		ExitCode:   exitCode,
+		ExitSignal: exitSignal,
 		Error:      errText,
 	}
 	data, err := json.Marshal(artifact)

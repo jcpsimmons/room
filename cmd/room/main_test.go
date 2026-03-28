@@ -49,11 +49,13 @@ func TestFormatRunProgress(t *testing.T) {
 
 	t.Run("iteration failure", func(t *testing.T) {
 		got := formatRunProgress(app.RunProgressEvent{
-			Phase:     app.RunProgressPhaseIterationFailure,
-			Iteration: 4,
-			Err:       errTestBoom,
+			Phase:      app.RunProgressPhaseIterationFailure,
+			Iteration:  4,
+			Err:        errTestBoom,
+			ExitCode:   137,
+			ExitSignal: "killed",
 		})
-		want := []string{"Iteration 4 failed: boom"}
+		want := []string{"Iteration 4 failed: boom [exit 137 via killed]"}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("formatRunProgress() = %#v, want %#v", got, want)
 		}
@@ -134,6 +136,7 @@ func TestToUIProgressEventCarriesDiagnostics(t *testing.T) {
 		Err:            errTestBoom,
 		StdoutFragment: "stdout fault",
 		StderrFragment: "stderr fault",
+		ExitCode:       70,
 	})
 
 	if ev.Kind != ui.ProgressFailure {
@@ -144,6 +147,9 @@ func TestToUIProgressEventCarriesDiagnostics(t *testing.T) {
 	}
 	if ev.Stderr != "stderr fault" {
 		t.Fatalf("stderr = %q", ev.Stderr)
+	}
+	if ev.Detail != "boom [exit 70]" {
+		t.Fatalf("detail = %q", ev.Detail)
 	}
 }
 
