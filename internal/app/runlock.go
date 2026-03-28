@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jcpsimmons/room/internal/fsutil"
@@ -17,13 +18,31 @@ type runLock struct {
 	RepoRoot    string    `json:"repo_root"`
 	Provider    string    `json:"provider"`
 	RoomVersion string    `json:"room_version"`
+	Iteration   int       `json:"iteration,omitempty"`
+	Phase       string    `json:"phase,omitempty"`
+	RunDir      string    `json:"run_dir,omitempty"`
+	PromptPath  string    `json:"prompt_path,omitempty"`
+	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
+}
+
+type activeRunLock struct {
+	path string
+	lock runLock
+	now  Clock
+}
+
+type runLockUpdate struct {
+	Iteration  int
+	Phase      string
+	RunDir     string
+	PromptPath string
 }
 
 func runLockPath(roomDir string) string {
 	return filepath.Join(roomDir, "run.lock.json")
 }
 
-func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() error, string, *bundleLockRecovery, error) {
+func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (*activeRunLock, string, *bundleLockRecovery, error) {
 	path := runLockPath(roomDir)
 	if err := fsutil.EnsureDir(roomDir); err != nil {
 		return nil, "", nil, err
@@ -48,20 +67,7 @@ func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() err
 			if nextRecovery != nil {
 				recovery = nextRecovery
 			}
-			release := func() error {
-				current, _, err := readRunLock(path)
-				if err != nil {
-					return nil
-				}
-				if !sameRunLock(current, lock) {
-					return nil
-				}
-				if err := removeRunLock(path); err != nil {
-					return err
-				}
-				return nil
-			}
-			return release, lockNote, recovery, nil
+			return &activeRunLock{path: path, lock: lock, now: s.now}, lockNote, recovery, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, "", nil, err
@@ -75,6 +81,46 @@ func (s *Service) acquireRunLock(roomDir, repoRoot, provider string) (func() err
 	}
 
 	return nil, "", nil, fmt.Errorf("run lock at %s kept changing while ROOM tried to acquire it; try again", path)
+}
+
+func (l *activeRunLock) Release() error {
+	if l == nil {
+		return nil
+	}
+	current, _, err := readRunLock(l.path)
+	if err != nil {
+		return nil
+	}
+	if !sameRunLock(current, l.lock) {
+		return nil
+	}
+	if err := removeRunLock(l.path); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (l *activeRunLock) Update(update runLockUpdate) error {
+	if l == nil {
+		return nil
+	}
+	current, _, err := readRunLock(l.path)
+	if err != nil {
+		return err
+	}
+	if !sameRunLock(current, l.lock) {
+		return nil
+	}
+	current.Iteration = update.Iteration
+	current.Phase = strings.TrimSpace(update.Phase)
+	current.RunDir = strings.TrimSpace(update.RunDir)
+	current.PromptPath = strings.TrimSpace(update.PromptPath)
+	if l.now != nil {
+		current.HeartbeatAt = l.now().UTC()
+	} else {
+		current.HeartbeatAt = time.Now().UTC()
+	}
+	return writeRunLock(l.path, current)
 }
 
 func readRunLock(path string) (runLock, string, error) {
@@ -182,7 +228,32 @@ func runLockHint(roomDir string, alive func(int) (bool, error)) (string, error) 
 		return "", err
 	}
 	if isAlive {
-		return fmt.Sprintf("Hint: active run lock held by pid %d since %s.", lock.PID, lock.StartedAt.UTC().Format(time.RFC3339)), nil
+		detail := formatRunLockDetail(lock)
+		if detail == "" {
+			return fmt.Sprintf("Hint: active run lock held by pid %d since %s.", lock.PID, lock.StartedAt.UTC().Format(time.RFC3339)), nil
+		}
+		return fmt.Sprintf("Hint: active run lock held by pid %d since %s; %s.", lock.PID, lock.StartedAt.UTC().Format(time.RFC3339), detail), nil
 	}
-	return fmt.Sprintf("Hint: stale run lock from pid %d since %s can be reclaimed on the next `room run`.", lock.PID, lock.StartedAt.UTC().Format(time.RFC3339)), nil
+	detail := formatRunLockDetail(lock)
+	if detail == "" {
+		return fmt.Sprintf("Hint: stale run lock from pid %d since %s can be reclaimed on the next `room run`.", lock.PID, lock.StartedAt.UTC().Format(time.RFC3339)), nil
+	}
+	return fmt.Sprintf("Hint: stale run lock from pid %d since %s can be reclaimed on the next `room run`; %s.", lock.PID, lock.StartedAt.UTC().Format(time.RFC3339), detail), nil
+}
+
+func formatRunLockDetail(lock runLock) string {
+	parts := make([]string, 0, 4)
+	if lock.Iteration > 0 {
+		parts = append(parts, fmt.Sprintf("iteration %d", lock.Iteration))
+	}
+	if phase := strings.TrimSpace(lock.Phase); phase != "" {
+		parts = append(parts, fmt.Sprintf("phase %s", phase))
+	}
+	if runDir := strings.TrimSpace(lock.RunDir); runDir != "" {
+		parts = append(parts, fmt.Sprintf("run %s", runDir))
+	}
+	if !lock.HeartbeatAt.IsZero() {
+		parts = append(parts, fmt.Sprintf("heartbeat %s", lock.HeartbeatAt.UTC().Format(time.RFC3339)))
+	}
+	return strings.Join(parts, ", ")
 }

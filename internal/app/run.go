@@ -247,12 +247,12 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	snapshot.LastProvider = provider
 	snapshot.LastProviderVersion = providerVersion
 
-	releaseLock, lockNote, lockRecovery, err := s.acquireRunLock(paths.RoomDir, repoRoot, provider)
+	runLock, lockNote, lockRecovery, err := s.acquireRunLock(paths.RoomDir, repoRoot, provider)
 	if err != nil {
 		return RunReport{}, err
 	}
 	defer func() {
-		if releaseErr := releaseLock(); releaseErr != nil && err == nil {
+		if releaseErr := runLock.Release(); releaseErr != nil && err == nil {
 			err = releaseErr
 		}
 	}()
@@ -319,6 +319,13 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			CommitEnabled:       commitEnabled,
 		}
 		emitter.Emit(iterationStartEvent)
+		if err := runLock.Update(runLockUpdate{
+			Iteration: nextIteration,
+			Phase:     string(RunProgressPhaseIterationStart),
+			RunDir:    runDir,
+		}); err != nil {
+			return RunReport{}, err
+		}
 
 		prepared, err := s.preparePrompt(ctx, repoRoot, cfg, paths, true)
 		if err != nil {
@@ -376,6 +383,13 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				CommitEnabled:       commitEnabled,
 			}
 			emitter.Emit(successEvent)
+			if err := runLock.Update(runLockUpdate{
+				Iteration: nextIteration,
+				Phase:     string(RunProgressPhaseIterationSuccess),
+				RunDir:    runDir,
+			}); err != nil {
+				return RunReport{}, err
+			}
 			if err := appendProgressArtifact(progressPath, successEvent); err != nil {
 				return RunReport{}, err
 			}
@@ -405,6 +419,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			CommitEnabled:       commitEnabled,
 		}
 		emitter.Emit(executionStartEvent)
+		if err := runLock.Update(runLockUpdate{
+			Iteration:  nextIteration,
+			Phase:      string(RunProgressPhaseAgentExecutionStart),
+			RunDir:     runDir,
+			PromptPath: promptPath,
+		}); err != nil {
+			return RunReport{}, err
+		}
 		if err := appendProgressArtifact(progressPath, executionStartEvent); err != nil {
 			return RunReport{}, err
 		}
@@ -446,6 +468,15 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 						CommitEnabled:       commitEnabled,
 					}
 					emitter.Emit(pulseEvent)
+					if err := runLock.Update(runLockUpdate{
+						Iteration:  nextIteration,
+						Phase:      string(RunProgressPhaseAgentExecutionPulse),
+						RunDir:     runDir,
+						PromptPath: promptPath,
+					}); err != nil {
+						ticker.Stop()
+						return RunReport{}, err
+					}
 					if err := appendProgressArtifact(progressPath, pulseEvent); err != nil {
 						ticker.Stop()
 						return RunReport{}, err
@@ -491,6 +522,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			}
 			snapshot.LastStatus = "interrupted"
 			snapshot.LastRunAt = finishedAt.UTC()
+			if err := runLock.Update(runLockUpdate{
+				Iteration:  nextIteration,
+				Phase:      string(RunProgressPhaseIterationFailure),
+				RunDir:     runDir,
+				PromptPath: promptPath,
+			}); err != nil {
+				return RunReport{}, err
+			}
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, errors.Join(ctx.Err(), err)
 			}
@@ -553,6 +592,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				Duration:            finishedAt.Sub(startedAt),
 			}
 			emitter.Emit(failureEvent)
+			if err := runLock.Update(runLockUpdate{
+				Iteration:  nextIteration,
+				Phase:      string(RunProgressPhaseIterationFailure),
+				RunDir:     runDir,
+				PromptPath: promptPath,
+			}); err != nil {
+				return RunReport{}, err
+			}
 			if err := appendProgressArtifact(progressPath, failureEvent); err != nil {
 				return RunReport{}, err
 			}
@@ -725,6 +772,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			Duration:            finishedAt.Sub(startedAt),
 		}
 		emitter.Emit(successEvent)
+		if err := runLock.Update(runLockUpdate{
+			Iteration:  nextIteration,
+			Phase:      string(RunProgressPhaseIterationSuccess),
+			RunDir:     runDir,
+			PromptPath: promptPath,
+		}); err != nil {
+			return RunReport{}, err
+		}
 		if err := appendProgressArtifact(progressPath, successEvent); err != nil {
 			return RunReport{}, err
 		}

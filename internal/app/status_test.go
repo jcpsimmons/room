@@ -168,6 +168,51 @@ diff --git a/a.txt b/a.txt
 	}
 }
 
+func TestStatusSurfacesActiveRunLockProgress(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+	writeTailBundle(t, paths.RunsDir, "0001", "active prompt", nil, "")
+
+	if err := writeRunLock(runLockPath(paths.RoomDir), runLock{
+		PID:         4242,
+		StartedAt:   time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+		RepoRoot:    repoRoot,
+		Provider:    "codex",
+		RoomVersion: "dev",
+		Iteration:   12,
+		Phase:       string(RunProgressPhaseAgentExecutionPulse),
+		RunDir:      filepath.Join(paths.RunsDir, "0012"),
+		HeartbeatAt: time.Date(2026, 3, 25, 11, 0, 9, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write run lock: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+		ProcessAlive: func(int) (bool, error) {
+			return true, nil
+		},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	for _, want := range []string{
+		"active run lock held by pid 4242",
+		"iteration 12",
+		"phase agent_execution_pulse",
+		filepath.Join(paths.RunsDir, "0012"),
+		"heartbeat 2026-03-25T11:00:09Z",
+	} {
+		if !strings.Contains(report.LatestLockHint, want) {
+			t.Fatalf("latest lock hint missing %q: %s", want, report.LatestLockHint)
+		}
+	}
+}
+
 func TestStatusSurvivesMissingInstructionFile(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

@@ -595,6 +595,78 @@ func TestRunReclaimsAStaleRunLock(t *testing.T) {
 	}
 }
 
+func TestRunStreamsLiveProgressIntoRunLock(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runFn: func(ctx context.Context, prompt agent.Prompt, schema agent.Schema, opts agent.RunOptions, outputPath string) (agent.Execution, error) {
+			lock, hint, err := readRunLock(runLockPath(paths.RoomDir))
+			if err != nil {
+				t.Fatalf("read run lock: %v", err)
+			}
+			if hint != "" {
+				t.Fatalf("unexpected run lock hint: %q", hint)
+			}
+			if lock.Iteration != 1 {
+				t.Fatalf("iteration = %d", lock.Iteration)
+			}
+			if lock.Phase != string(RunProgressPhaseAgentExecutionStart) {
+				t.Fatalf("phase = %q", lock.Phase)
+			}
+			if lock.RunDir != filepath.Join(paths.RunsDir, "0001") {
+				t.Fatalf("run dir = %q", lock.RunDir)
+			}
+			if lock.PromptPath != filepath.Join(paths.RunsDir, "0001", "prompt.txt") {
+				t.Fatalf("prompt path = %q", lock.PromptPath)
+			}
+			result := agent.Result{
+				Summary:         "Locked onto the live pass",
+				NextInstruction: "Chase another signal",
+				Status:          "continue",
+				CommitMessage:   "lock live progress into run lock",
+			}
+			data, err := json.Marshal(result)
+			if err != nil {
+				t.Fatalf("marshal result: %v", err)
+			}
+			if err := os.WriteFile(outputPath, append(data, '\n'), 0o644); err != nil {
+				t.Fatalf("write result: %v", err)
+			}
+			return agent.Execution{
+				Result:     result,
+				Command:    []string{"codex", "exec"},
+				DurationMS: 250,
+			}, nil
+		},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/file b/file"},
+		statsSeq:     []git.DiffStats{{Files: 1, Added: 2, Deleted: 1}},
+		commitHashes: []string{"abc123"},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+}
+
 func TestRunReclaimsAMalformedRunLock(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, paths := prepareInitializedRepo(t, repoRoot)

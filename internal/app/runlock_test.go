@@ -36,12 +36,12 @@ func TestAcquireRunLockPreventsOverwriteWhenSlotAlreadyExists(t *testing.T) {
 		},
 	})
 
-	release, note, recovery, err := svc.acquireRunLock(roomDir, "/tmp/repo", "codex")
+	lock, note, recovery, err := svc.acquireRunLock(roomDir, "/tmp/repo", "codex")
 	if err != nil {
 		t.Fatalf("acquire run lock: %v", err)
 	}
 	defer func() {
-		if releaseErr := release(); releaseErr != nil {
+		if releaseErr := lock.Release(); releaseErr != nil {
 			t.Fatalf("release run lock: %v", releaseErr)
 		}
 	}()
@@ -82,7 +82,7 @@ func TestAcquireRunLockReclaimsEmptyFile(t *testing.T) {
 		Version: version.Info{Version: "dev"},
 	})
 
-	release, note, recovery, err := svc.acquireRunLock(roomDir, "/tmp/repo", "codex")
+	lock, note, recovery, err := svc.acquireRunLock(roomDir, "/tmp/repo", "codex")
 	if err != nil {
 		t.Fatalf("acquire run lock: %v", err)
 	}
@@ -92,10 +92,63 @@ func TestAcquireRunLockReclaimsEmptyFile(t *testing.T) {
 	if note != "Hint: empty run lock reclaimed; ROOM rewired the slot for a fresh run." {
 		t.Fatalf("lock note = %q", note)
 	}
-	if releaseErr := release(); releaseErr != nil {
+	if releaseErr := lock.Release(); releaseErr != nil {
 		t.Fatalf("release run lock: %v", releaseErr)
 	}
 	if _, statErr := os.Stat(lockPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("expected lock removal, stat err=%v", statErr)
+	}
+}
+
+func TestAcquireRunLockUpdatesLiveProgress(t *testing.T) {
+	t.Parallel()
+
+	roomDir := t.TempDir()
+	now := sequencedClock(
+		time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 3, 25, 12, 0, 3, 0, time.UTC),
+	)
+	svc := NewService(Dependencies{
+		Now:     now,
+		Version: version.Info{Version: "dev"},
+	})
+
+	lock, _, _, err := svc.acquireRunLock(roomDir, "/tmp/repo", "codex")
+	if err != nil {
+		t.Fatalf("acquire run lock: %v", err)
+	}
+	if err := lock.Update(runLockUpdate{
+		Iteration:  7,
+		Phase:      string(RunProgressPhaseAgentExecutionPulse),
+		RunDir:     "/tmp/repo/.room/runs/0007",
+		PromptPath: "/tmp/repo/.room/runs/0007/prompt.txt",
+	}); err != nil {
+		t.Fatalf("update run lock: %v", err)
+	}
+
+	current, hint, err := readRunLock(runLockPath(roomDir))
+	if err != nil {
+		t.Fatalf("read run lock: %v", err)
+	}
+	if hint != "" {
+		t.Fatalf("unexpected hint: %q", hint)
+	}
+	if current.Iteration != 7 {
+		t.Fatalf("iteration = %d", current.Iteration)
+	}
+	if current.Phase != string(RunProgressPhaseAgentExecutionPulse) {
+		t.Fatalf("phase = %q", current.Phase)
+	}
+	if current.RunDir != "/tmp/repo/.room/runs/0007" {
+		t.Fatalf("run dir = %q", current.RunDir)
+	}
+	if current.PromptPath != "/tmp/repo/.room/runs/0007/prompt.txt" {
+		t.Fatalf("prompt path = %q", current.PromptPath)
+	}
+	if !current.HeartbeatAt.Equal(time.Date(2026, 3, 25, 12, 0, 3, 0, time.UTC)) {
+		t.Fatalf("heartbeat = %s", current.HeartbeatAt)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatalf("release run lock: %v", err)
 	}
 }
