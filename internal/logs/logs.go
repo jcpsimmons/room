@@ -23,6 +23,10 @@ type SummaryEntry struct {
 	FocusAreas   []string  `json:"focus_areas,omitempty"`
 }
 
+type seenInstructionEntry struct {
+	Instruction string `json:"instruction"`
+}
+
 func AppendSummary(path string, entry SummaryEntry) (err error) {
 	if err := fsutil.EnsureDir(filepath.Dir(path)); err != nil {
 		return err
@@ -109,7 +113,11 @@ func AppendSeenInstruction(path, instruction string) (err error) {
 	if trimmed == "" {
 		return nil
 	}
-	_, err = f.WriteString(trimmed + "\n")
+	data, err := json.Marshal(seenInstructionEntry{Instruction: trimmed})
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(data, '\n'))
 	return err
 }
 
@@ -123,15 +131,28 @@ func ReadSeenInstructions(path string, limit int) (values []string, err error) {
 	}
 
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			values = append(values, line)
+		instruction := parseSeenInstructionLine(line)
+		if instruction != "" {
+			values = append(values, instruction)
 		}
 	}
 	if len(values) <= limit {
 		return values, nil
 	}
 	return values[len(values)-limit:], nil
+}
+
+func parseSeenInstructionLine(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+
+	var entry seenInstructionEntry
+	if err := json.Unmarshal([]byte(line), &entry); err == nil && strings.TrimSpace(entry.Instruction) != "" {
+		return strings.TrimSpace(entry.Instruction)
+	}
+	return line
 }
 
 func readRecentLogLines(path string, limit int) ([]string, error) {

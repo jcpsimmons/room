@@ -135,6 +135,64 @@ func TestReadSeenInstructionsHandlesOversizedLines(t *testing.T) {
 	}
 }
 
+func TestAppendSeenInstructionPreservesMultilineInstructions(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "seen.log")
+
+	want := "Patch the relay\nListen for aliasing\nReturn with a different clock"
+	if err := AppendSeenInstruction(path, want); err != nil {
+		t.Fatalf("append seen instruction: %v", err)
+	}
+
+	loaded, err := ReadSeenInstructions(path, 1)
+	if err != nil {
+		t.Fatalf("read seen instructions: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded instructions = %#v", loaded)
+	}
+	if loaded[0] != want {
+		t.Fatalf("loaded instruction = %q, want %q", loaded[0], want)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if strings.Count(string(data), "\n") != 1 {
+		t.Fatalf("expected one log line, got %q", string(data))
+	}
+}
+
+func TestReadSeenInstructionsSupportsLegacyAndJSONEntries(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "seen.log")
+
+	payload := strings.Join([]string{
+		"legacy plain line",
+		`{"instruction":"json\nwrapped"}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write seen instructions: %v", err)
+	}
+
+	loaded, err := ReadSeenInstructions(path, 5)
+	if err != nil {
+		t.Fatalf("read seen instructions: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("loaded instructions = %#v", loaded)
+	}
+	if loaded[0] != "legacy plain line" || loaded[1] != "json\nwrapped" {
+		t.Fatalf("loaded instructions = %#v", loaded)
+	}
+}
+
 func TestReadRecentLogsReturnTailEntriesFromLargeFiles(t *testing.T) {
 	t.Parallel()
 
