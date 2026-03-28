@@ -24,6 +24,7 @@ import (
 type fakeRunner struct {
 	version   string
 	versionFn func(context.Context, string) (string, error)
+	runFn     func(context.Context, agent.Prompt, agent.Schema, agent.RunOptions, string) (agent.Execution, error)
 	calls     int
 	prompts   []string
 	runs      []fakeRun
@@ -43,7 +44,10 @@ func (f *fakeRunner) Version(ctx context.Context, binary string) (string, error)
 	return f.version, nil
 }
 
-func (f *fakeRunner) Run(_ context.Context, prompt agent.Prompt, _ agent.Schema, _ agent.RunOptions, outputPath string) (agent.Execution, error) {
+func (f *fakeRunner) Run(ctx context.Context, prompt agent.Prompt, schema agent.Schema, opts agent.RunOptions, outputPath string) (agent.Execution, error) {
+	if f.runFn != nil {
+		return f.runFn(ctx, prompt, schema, opts, outputPath)
+	}
 	if f.calls >= len(f.runs) {
 		return agent.Execution{}, errors.New("unexpected run call")
 	}
@@ -1265,6 +1269,84 @@ func TestRunUsesClaudeProviderWhenConfigured(t *testing.T) {
 	}
 	if snapshot.LastProviderVersion != "1.0.79" {
 		t.Fatalf("last provider version = %q", snapshot.LastProviderVersion)
+	}
+}
+
+func TestRunEmitsAgentExecutionPulseDuringLongRuns(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	previousInterval := runHeartbeatInterval
+	runHeartbeatInterval = 10 * time.Millisecond
+	t.Cleanup(func() {
+		runHeartbeatInterval = previousInterval
+	})
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runFn: func(_ context.Context, _ agent.Prompt, _ agent.Schema, _ agent.RunOptions, outputPath string) (agent.Execution, error) {
+			time.Sleep(35 * time.Millisecond)
+			result := agent.Result{
+				Summary:         "Stretched a long carrier into telemetry",
+				NextInstruction: "Patch the next circuit",
+				Status:          "continue",
+				CommitMessage:   "add carrier telemetry",
+			}
+			data, err := json.Marshal(result)
+			if err != nil {
+				return agent.Execution{}, err
+			}
+			if err := os.WriteFile(outputPath, append(data, '\n'), 0o644); err != nil {
+				return agent.Execution{}, err
+			}
+			return agent.Execution{
+				Result:     result,
+				Command:    []string{"codex", "exec"},
+				DurationMS: 35,
+			}, nil
+		},
+	}
+	fakeGit := &fakeGit{
+		root:     repoRoot,
+		dirtySeq: []bool{false},
+		diffSeq:  []string{""},
+		statsSeq: []git.DiffStats{{}},
+	}
+
+	var pulses []RunProgressEvent
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       time.Now,
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		NoCommit:   true,
+		Progress: func(event RunProgressEvent) {
+			if event.Phase == RunProgressPhaseAgentExecutionPulse {
+				pulses = append(pulses, event)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if report.CompletedIterations != 1 {
+		t.Fatalf("completed iterations = %d", report.CompletedIterations)
+	}
+	if len(pulses) < 2 {
+		t.Fatalf("pulse count = %d, want at least 2", len(pulses))
+	}
+	for i, pulse := range pulses {
+		if pulse.ExecutionElapsedMS <= 0 {
+			t.Fatalf("pulse %d elapsed = %d, want > 0", i, pulse.ExecutionElapsedMS)
+		}
+		if pulse.Iteration != 1 {
+			t.Fatalf("pulse %d iteration = %d, want 1", i, pulse.Iteration)
+		}
 	}
 }
 

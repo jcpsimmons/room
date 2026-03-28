@@ -44,10 +44,13 @@ const (
 	RunProgressPhaseRunStart            RunProgressPhase = "run_start"
 	RunProgressPhaseIterationStart      RunProgressPhase = "iteration_start"
 	RunProgressPhaseAgentExecutionStart RunProgressPhase = "agent_execution_start"
+	RunProgressPhaseAgentExecutionPulse RunProgressPhase = "agent_execution_pulse"
 	RunProgressPhaseIterationSuccess    RunProgressPhase = "iteration_success"
 	RunProgressPhaseIterationFailure    RunProgressPhase = "iteration_failure"
 	RunProgressPhaseRunFinish           RunProgressPhase = "run_finish"
 )
+
+var runHeartbeatInterval = 5 * time.Second
 
 type RunProgressEvent struct {
 	Phase               RunProgressPhase `json:"phase"`
@@ -76,6 +79,7 @@ type RunProgressEvent struct {
 	PhaseStartedAt      time.Time        `json:"phase_started_at,omitempty"`
 	PhaseFinishedAt     time.Time        `json:"phase_finished_at,omitempty"`
 	PhaseLatencyMS      int64            `json:"phase_latency_ms,omitempty"`
+	ExecutionElapsedMS  int64            `json:"execution_elapsed_ms,omitempty"`
 	StartedAt           time.Time        `json:"started_at"`
 	FinishedAt          time.Time        `json:"finished_at"`
 	Duration            time.Duration    `json:"duration"`
@@ -368,7 +372,51 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			StartedAt:           startedAt.UTC(),
 			CommitEnabled:       commitEnabled,
 		})
-		execution, runErr := runner.Run(ctx, agent.Prompt{Body: promptBody}, agent.Schema{Path: paths.SchemaPath}, s.runOptionsForProvider(cfg, repoRoot), resultPath)
+		type runnerResult struct {
+			execution agent.Execution
+			err       error
+		}
+		resultCh := make(chan runnerResult, 1)
+		go func() {
+			execution, runErr := runner.Run(ctx, agent.Prompt{Body: promptBody}, agent.Schema{Path: paths.SchemaPath}, s.runOptionsForProvider(cfg, repoRoot), resultPath)
+			resultCh <- runnerResult{execution: execution, err: runErr}
+		}()
+		var (
+			execution agent.Execution
+			runErr    error
+		)
+		if runHeartbeatInterval > 0 {
+			ticker := time.NewTicker(runHeartbeatInterval)
+			defer ticker.Stop()
+			running := true
+			for running {
+				select {
+				case result := <-resultCh:
+					execution = result.execution
+					runErr = result.err
+					running = false
+				case tickAt := <-ticker.C:
+					emitter.Emit(RunProgressEvent{
+						Phase:               RunProgressPhaseAgentExecutionPulse,
+						RepoRoot:            repoRoot,
+						Provider:            provider,
+						RequestedIterations: opts.Iterations,
+						CompletedIterations: completed,
+						Failures:            failures,
+						Iteration:           nextIteration,
+						RunDir:              runDir,
+						PromptPath:          promptPath,
+						StartedAt:           startedAt.UTC(),
+						ExecutionElapsedMS:  tickAt.Sub(startedAt).Milliseconds(),
+						CommitEnabled:       commitEnabled,
+					})
+				}
+			}
+		} else {
+			result := <-resultCh
+			execution = result.execution
+			runErr = result.err
+		}
 		finishedAt := s.now()
 
 		if err := fsutil.AtomicWriteFile(filepath.Join(runDir, "stdout.log"), []byte(execution.Stdout), 0o644); err != nil {

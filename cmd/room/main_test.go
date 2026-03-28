@@ -59,6 +59,19 @@ func TestFormatRunProgress(t *testing.T) {
 		}
 	})
 
+	t.Run("execution pulse", func(t *testing.T) {
+		got := formatRunProgress(app.RunProgressEvent{
+			Phase:              app.RunProgressPhaseAgentExecutionPulse,
+			Iteration:          3,
+			Provider:           "codex",
+			ExecutionElapsedMS: 1460,
+		})
+		want := []string{"Iteration 3 still running with Codex after 1.5s..."}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("formatRunProgress() = %#v, want %#v", got, want)
+		}
+	})
+
 	t.Run("wrapper drift failure", func(t *testing.T) {
 		got := formatRunProgress(app.RunProgressEvent{
 			Phase:     app.RunProgressPhaseIterationFailure,
@@ -131,6 +144,25 @@ func TestToUIProgressEventCarriesDiagnostics(t *testing.T) {
 	}
 	if ev.Stderr != "stderr fault" {
 		t.Fatalf("stderr = %q", ev.Stderr)
+	}
+}
+
+func TestToUIProgressEventMapsExecutionPulse(t *testing.T) {
+	ev := toUIProgressEvent(app.RunProgressEvent{
+		Phase:              app.RunProgressPhaseAgentExecutionPulse,
+		Iteration:          4,
+		Provider:           "claude",
+		ExecutionElapsedMS: 3200,
+	})
+
+	if ev.Kind != ui.ProgressMessageKind {
+		t.Fatalf("kind = %q", ev.Kind)
+	}
+	if ev.Title != "CLAUDE carrier wave stable" {
+		t.Fatalf("title = %q", ev.Title)
+	}
+	if ev.Detail != "step 4 in flight for 3.2s" {
+		t.Fatalf("detail = %q", ev.Detail)
 	}
 }
 

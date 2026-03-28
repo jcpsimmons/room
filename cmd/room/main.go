@@ -493,6 +493,13 @@ func formatRunProgress(event app.RunProgressEvent) []string {
 		return []string{fmt.Sprintf("Starting iteration %d...", event.Iteration)}
 	case app.RunProgressPhaseAgentExecutionStart:
 		return []string{fmt.Sprintf("Executing iteration %d with %s...", event.Iteration, agent.DisplayName(event.Provider))}
+	case app.RunProgressPhaseAgentExecutionPulse:
+		return []string{fmt.Sprintf(
+			"Iteration %d still running with %s after %s...",
+			event.Iteration,
+			agent.DisplayName(event.Provider),
+			formatHeartbeatDuration(event.ExecutionElapsedMS),
+		)}
 	case app.RunProgressPhaseIterationSuccess:
 		if event.DryRun {
 			return []string{fmt.Sprintf("Dry run prepared prompt for iteration %d at %s", event.Iteration, event.PromptPath)}
@@ -581,6 +588,10 @@ func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
 		out.Kind = ui.ProgressStep
 		out.Title = fmt.Sprintf("%s oscillating", strings.ToUpper(event.Provider))
 		out.Detail = fmt.Sprintf("step %d signal routed", event.Iteration)
+	case app.RunProgressPhaseAgentExecutionPulse:
+		out.Kind = ui.ProgressMessageKind
+		out.Title = fmt.Sprintf("%s carrier wave stable", strings.ToUpper(event.Provider))
+		out.Detail = fmt.Sprintf("step %d in flight for %s", event.Iteration, formatHeartbeatDuration(event.ExecutionElapsedMS))
 	case app.RunProgressPhaseIterationSuccess:
 		out.Kind = ui.ProgressComplete
 		out.Title = fmt.Sprintf("step %d output captured", event.Iteration)
@@ -644,6 +655,13 @@ func progressWhen(event app.RunProgressEvent) time.Time {
 	default:
 		return time.Now()
 	}
+}
+
+func formatHeartbeatDuration(ms int64) string {
+	if ms < 0 {
+		ms = 0
+	}
+	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
 }
 
 func renderInit(report app.InitReport) error {
