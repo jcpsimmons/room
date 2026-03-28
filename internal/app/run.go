@@ -389,7 +389,6 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		)
 		if runHeartbeatInterval > 0 {
 			ticker := time.NewTicker(runHeartbeatInterval)
-			defer ticker.Stop()
 			running := true
 			for running {
 				select {
@@ -414,6 +413,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 					})
 				}
 			}
+			ticker.Stop()
 		} else {
 			result := <-resultCh
 			execution = result.execution
@@ -430,6 +430,13 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		if err := writeExecutionArtifact(executionPath, provider, execution, startedAt, finishedAt, runErr); err != nil {
 			return RunReport{}, err
 		}
+		// Release large stdout/stderr buffers now that they're persisted to disk.
+		// faultFragment (used in the failure branch below) makes its own copy,
+		// so capture fragments before clearing.
+		stdoutFrag := faultFragment(execution.Stdout)
+		stderrFrag := faultFragment(execution.Stderr)
+		execution.Stdout = ""
+		execution.Stderr = ""
 
 		if ctx.Err() != nil && !execution.TimedOut {
 			if manifestErr := writeBundleManifest(runDir, bundleModeInterrupted, existingArtifacts(runDir,
@@ -492,8 +499,8 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				RunDir:              runDir,
 				PromptPath:          promptPath,
 				Status:              "failed",
-				StdoutFragment:      faultFragment(execution.Stdout),
-				StderrFragment:      faultFragment(execution.Stderr),
+				StdoutFragment:      stdoutFrag,
+				StderrFragment:      stderrFrag,
 				ExitCode:            execution.ExitCode,
 				ExitSignal:          execution.ExitSignal,
 				Err:                 runErr,
