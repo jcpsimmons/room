@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -177,5 +178,109 @@ func TestTapeFlagsInstructionDrift(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(report.Lines, "\n"), "Instruction drift: 1 tape step(s) are missing captured next-instruction data.") {
 		t.Fatalf("expected instruction drift note:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}
+
+func TestTapeDetectsRepeatedNextInstructionEchoes(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	sharedInstruction := "Pivot hard. Route the next pass through a different subsystem."
+	for _, tc := range []struct {
+		iteration int
+		status    string
+		summary   string
+		next      string
+		when      time.Time
+	}{
+		{
+			iteration: 1,
+			status:    "pivot",
+			summary:   "Shifted tape output into a wider replay window",
+			next:      sharedInstruction,
+			when:      time.Date(2026, 3, 26, 10, 1, 0, 0, time.UTC),
+		},
+		{
+			iteration: 2,
+			status:    "pivot",
+			summary:   "Rewired prune recovery around verified manifests",
+			next:      "Listen for latency in the live telemetry path",
+			when:      time.Date(2026, 3, 26, 10, 2, 0, 0, time.UTC),
+		},
+		{
+			iteration: 3,
+			status:    "pivot",
+			summary:   "Detected repeated next-step prompts in the tape",
+			next:      "  Pivot hard.\nRoute the next pass through a different subsystem.  ",
+			when:      time.Date(2026, 3, 26, 10, 3, 0, 0, time.UTC),
+		},
+		{
+			iteration: 4,
+			status:    "continue",
+			summary:   "Held the same stale control voltage one step too long",
+			next:      sharedInstruction,
+			when:      time.Date(2026, 3, 26, 10, 4, 0, 0, time.UTC),
+		},
+		{
+			iteration: 5,
+			status:    "continue",
+			summary:   "Repeated the stale control voltage again",
+			next:      sharedInstruction,
+			when:      time.Date(2026, 3, 26, 10, 5, 0, 0, time.UTC),
+		},
+	} {
+		if err := logs.AppendSeenInstruction(paths.SeenInstructionsPath, tc.next); err != nil {
+			t.Fatalf("append seen instruction: %v", err)
+		}
+		if err := logs.AppendSummary(paths.SummariesPath, logs.SummaryEntry{
+			Iteration:    tc.iteration,
+			Timestamp:    tc.when,
+			Status:       tc.status,
+			Summary:      tc.summary,
+			ChangedFiles: 1,
+			LinesAdded:   2,
+		}); err != nil {
+			t.Fatalf("append summary: %v", err)
+		}
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Tape(context.Background(), TapeOptions{WorkingDir: repoRoot, Limit: 8})
+	if err != nil {
+		t.Fatalf("tape: %v", err)
+	}
+
+	if len(report.InstructionEchoes) != 1 {
+		t.Fatalf("instruction echo count = %d", len(report.InstructionEchoes))
+	}
+	echo := report.InstructionEchoes[0]
+	if echo.Count != 4 {
+		t.Fatalf("echo count = %d", echo.Count)
+	}
+	if got := strings.Join([]string{
+		fmt.Sprintf("%d", echo.Iterations[0]),
+		fmt.Sprintf("%d", echo.Iterations[1]),
+		fmt.Sprintf("%d", echo.Iterations[2]),
+		fmt.Sprintf("%d", echo.Iterations[3]),
+	}, ","); got != "1,3,4,5" {
+		t.Fatalf("echo iterations = %q", got)
+	}
+	if !echo.Consecutive {
+		t.Fatal("expected consecutive instruction echo")
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	for _, want := range []string{
+		"Instruction echo: 1 repeated next-instruction motif(s) detected in this window.",
+		"echo x4 on #1, #3, #4, #5 (consecutive): Pivot hard. Route the next pass through a different subsystem.",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("tape output missing %q:\n%s", want, joined)
+		}
 	}
 }
