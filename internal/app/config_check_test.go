@@ -186,4 +186,42 @@ binary = "${ROOM_TEST_MISSING_CODEX_BINARY}"
 	if !strings.Contains(joined, "Config parse failed: config references missing environment variable(s): ROOM_TEST_MISSING_CODEX_BINARY") {
 		t.Fatalf("expected missing-env note in:\n%s", joined)
 	}
+	if !strings.Contains(joined, "Env patch points: ROOM_TEST_MISSING_CODEX_BINARY=missing") {
+		t.Fatalf("expected env-routing note in:\n%s", joined)
+	}
+}
+
+func TestConfigCheckReportsEnvironmentPatchPoints(t *testing.T) {
+	t.Setenv("ROOM_TEST_CLAUDE_BINARY", "claude-lab")
+
+	repoRoot := initGitRepo(t)
+	writeRepoFile(t, filepath.Join(repoRoot, "README.md"), "hello\n")
+	runGit(t, repoRoot, "add", "README.md")
+	runGit(t, repoRoot, "commit", "-m", "init")
+
+	writeRepoFile(t, filepath.Join(repoRoot, ".room", "config.toml"), `
+[agent]
+provider = "claude"
+
+[claude]
+binary = "${ROOM_TEST_CLAUDE_BINARY}"
+model = "${ROOM_TEST_OPTIONAL_MODEL:-}"
+permission_mode = "bypassPermissions"
+`)
+
+	svc := NewService(Dependencies{
+		Git:     git.NewClient(),
+		Now:     fixedClock(),
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.ConfigCheck(context.Background(), ConfigCheckOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("config check: %v", err)
+	}
+
+	joined := strings.Join(report.Lines, "\n")
+	if !strings.Contains(joined, "Env patch points: ROOM_TEST_CLAUDE_BINARY=env, ROOM_TEST_OPTIONAL_MODEL=default(empty)") {
+		t.Fatalf("expected env patch point note in:\n%s", joined)
+	}
 }

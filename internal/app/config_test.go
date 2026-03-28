@@ -132,7 +132,11 @@ model = "${ROOM_TEST_CODEX_MODEL}"
 	}
 
 	joined := strings.Join(report.Lines, "\n")
-	for _, want := range []string{"Agent binary: codex-lab", "Codex model: gpt-5.4"} {
+	for _, want := range []string{
+		"Agent binary: codex-lab",
+		"Codex model: gpt-5.4",
+		"Env patch points: ROOM_TEST_CODEX_BINARY=env, ROOM_TEST_CODEX_MODEL=env",
+	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("config report missing %q in:\n%s", want, joined)
 		}

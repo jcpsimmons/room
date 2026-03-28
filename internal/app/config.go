@@ -17,13 +17,14 @@ type ConfigOptions struct {
 }
 
 type ConfigReport struct {
-	RepoRoot     string        `json:"repo_root"`
-	ConfigPath   string        `json:"config_path"`
-	RoomDir      string        `json:"room_dir"`
-	ConfigExists bool          `json:"config_exists"`
-	Config       config.Config `json:"config"`
-	Paths        config.Paths  `json:"paths"`
-	Lines        []string      `json:"lines"`
+	RepoRoot     string                `json:"repo_root"`
+	ConfigPath   string                `json:"config_path"`
+	RoomDir      string                `json:"room_dir"`
+	ConfigExists bool                  `json:"config_exists"`
+	Config       config.Config         `json:"config"`
+	Paths        config.Paths          `json:"paths"`
+	EnvRefs      []config.EnvReference `json:"env_references,omitempty"`
+	Lines        []string              `json:"lines"`
 }
 
 func (s *Service) Config(ctx context.Context, opts ConfigOptions) (ConfigReport, error) {
@@ -42,6 +43,10 @@ func (s *Service) Config(ctx context.Context, opts ConfigOptions) (ConfigReport,
 		return ConfigReport{}, err
 	}
 	paths := config.ResolvePaths(repoRoot, configPath, cfg)
+	envRefs, err := config.ReadEnvReferences(paths.ConfigPath)
+	if err != nil {
+		return ConfigReport{}, err
+	}
 
 	lines := []string{
 		"ROOM config",
@@ -77,6 +82,9 @@ func (s *Service) Config(ctx context.Context, opts ConfigOptions) (ConfigReport,
 		fmt.Sprintf("Seen instructions file: %s", paths.SeenInstructionsPath),
 		fmt.Sprintf("Runs dir: %s", paths.RunsDir),
 	)
+	if envLine := formatEnvReferences(envRefs); envLine != "" {
+		lines = append(lines, fmt.Sprintf("Env patch points: %s", envLine))
+	}
 	if strings.TrimSpace(cfg.Codex.Model) != "" && agent.NormalizeProvider(cfg.Agent.Provider) == agent.ProviderCodex {
 		lines = append(lines, fmt.Sprintf("Codex model: %s", cfg.Codex.Model))
 	}
@@ -91,6 +99,7 @@ func (s *Service) Config(ctx context.Context, opts ConfigOptions) (ConfigReport,
 		ConfigExists: fsutil.FileExists(paths.ConfigPath),
 		Config:       cfg,
 		Paths:        paths,
+		EnvRefs:      envRefs,
 		Lines:        lines,
 	}, nil
 }

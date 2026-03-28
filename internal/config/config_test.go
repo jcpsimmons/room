@@ -261,3 +261,64 @@ model = "${ROOM_TEST_MISSING_BINARY}"
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadHonorsEmptyEnvironmentDefaults(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	input := []byte(`
+[claude]
+model = "${ROOM_TEST_OPTIONAL_MODEL:-}"
+`)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Claude.Model != "" {
+		t.Fatalf("claude model = %q, want empty string", cfg.Claude.Model)
+	}
+}
+
+func TestReadEnvReferencesReportsSources(t *testing.T) {
+	t.Setenv("ROOM_TEST_FROM_ENV", "codex-lab")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	input := []byte(`
+[codex]
+binary = "${ROOM_TEST_FROM_ENV}"
+model = "${ROOM_TEST_FROM_DEFAULT:-gpt-lab}"
+
+[claude]
+model = "${ROOM_TEST_FROM_EMPTY_DEFAULT:-}"
+binary = "${ROOM_TEST_MISSING_BINARY}"
+`)
+	if err := os.WriteFile(path, input, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	refs, err := ReadEnvReferences(path)
+	if err != nil {
+		t.Fatalf("read env references: %v", err)
+	}
+
+	want := []EnvReference{
+		{Name: "ROOM_TEST_FROM_ENV", Source: "env"},
+		{Name: "ROOM_TEST_FROM_DEFAULT", Source: "default"},
+		{Name: "ROOM_TEST_FROM_EMPTY_DEFAULT", Source: "default", DefaultEmpty: true},
+		{Name: "ROOM_TEST_MISSING_BINARY", Source: "missing"},
+	}
+	if len(refs) != len(want) {
+		t.Fatalf("env refs len = %d, want %d (%#v)", len(refs), len(want), refs)
+	}
+	for i := range want {
+		if refs[i] != want[i] {
+			t.Fatalf("env ref[%d] = %#v, want %#v", i, refs[i], want[i])
+		}
+	}
+}

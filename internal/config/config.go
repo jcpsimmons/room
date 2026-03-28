@@ -89,6 +89,12 @@ type Paths struct {
 	RunsDir              string `json:"runs_dir"`
 }
 
+type EnvReference struct {
+	Name         string `json:"name"`
+	Source       string `json:"source"`
+	DefaultEmpty bool   `json:"default_empty,omitempty"`
+}
+
 func Default() Config {
 	return Config{
 		Agent: AgentConfig{
@@ -311,17 +317,17 @@ func expandEnvPlaceholders(cfg Config) (Config, error) {
 	var missing []string
 	expand := func(value string) string {
 		return envPlaceholderRe.ReplaceAllStringFunc(value, func(match string) string {
-			pieces := envPlaceholderRe.FindStringSubmatch(match)
-			if len(pieces) < 2 {
+			ref, ok := parseEnvReference(match)
+			if !ok {
 				return match
 			}
-			if resolved, ok := os.LookupEnv(pieces[1]); ok {
+			if resolved, ok := os.LookupEnv(ref.Name); ok {
 				return resolved
 			}
-			if len(pieces) >= 3 && pieces[2] != "" {
-				return pieces[2]
+			if ref.hasDefault() {
+				return ref.defaultValue()
 			}
-			missing = append(missing, pieces[1])
+			missing = append(missing, ref.Name)
 			return match
 		})
 	}
@@ -343,4 +349,96 @@ func expandEnvPlaceholders(cfg Config) (Config, error) {
 		return Config{}, fmt.Errorf("config references missing environment variable(s): %s", strings.Join(missing, ", "))
 	}
 	return cfg, nil
+}
+
+func ReadEnvReferences(path string) ([]EnvReference, error) {
+	data, err := fsutil.ReadFileIfExists(path)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]EnvReference)
+	var ordered []EnvReference
+	for _, match := range envPlaceholderRe.FindAllString(string(data), -1) {
+		ref, ok := parseEnvReference(match)
+		if !ok {
+			continue
+		}
+
+		entry := EnvReference{Name: ref.Name}
+		switch {
+		case ref.fromEnvironment():
+			entry.Source = "env"
+		case ref.hasDefault():
+			entry.Source = "default"
+			entry.DefaultEmpty = ref.defaultValue() == ""
+		default:
+			entry.Source = "missing"
+		}
+
+		if prior, ok := seen[entry.Name]; ok {
+			if envReferenceRank(entry) > envReferenceRank(prior) {
+				seen[entry.Name] = entry
+				for i := range ordered {
+					if ordered[i].Name == entry.Name {
+						ordered[i] = entry
+						break
+					}
+				}
+			}
+			continue
+		}
+
+		seen[entry.Name] = entry
+		ordered = append(ordered, entry)
+	}
+
+	return ordered, nil
+}
+
+func envReferenceRank(ref EnvReference) int {
+	switch ref.Source {
+	case "missing":
+		return 3
+	case "env":
+		return 2
+	case "default":
+		return 1
+	default:
+		return 0
+	}
+}
+
+type parsedEnvReference struct {
+	Name          string
+	defaultSet    bool
+	defaultString string
+}
+
+func parseEnvReference(match string) (parsedEnvReference, bool) {
+	pieces := envPlaceholderRe.FindStringSubmatch(match)
+	if len(pieces) < 2 {
+		return parsedEnvReference{}, false
+	}
+	ref := parsedEnvReference{Name: pieces[1]}
+	if strings.Contains(match, ":-") {
+		ref.defaultSet = true
+		if len(pieces) >= 3 {
+			ref.defaultString = pieces[2]
+		}
+	}
+	return ref, true
+}
+
+func (r parsedEnvReference) hasDefault() bool {
+	return r.defaultSet
+}
+
+func (r parsedEnvReference) defaultValue() string {
+	return r.defaultString
+}
+
+func (r parsedEnvReference) fromEnvironment() bool {
+	_, ok := os.LookupEnv(r.Name)
+	return ok
 }

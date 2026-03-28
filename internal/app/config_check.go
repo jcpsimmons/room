@@ -16,13 +16,14 @@ type ConfigCheckOptions struct {
 }
 
 type ConfigCheckReport struct {
-	RepoRoot     string        `json:"repo_root"`
-	ConfigPath   string        `json:"config_path"`
-	ConfigExists bool          `json:"config_exists"`
-	Config       config.Config `json:"config"`
-	Paths        config.Paths  `json:"paths"`
-	SchemaHint   string        `json:"schema_hint,omitempty"`
-	Lines        []string      `json:"lines"`
+	RepoRoot     string                `json:"repo_root"`
+	ConfigPath   string                `json:"config_path"`
+	ConfigExists bool                  `json:"config_exists"`
+	Config       config.Config         `json:"config"`
+	Paths        config.Paths          `json:"paths"`
+	EnvRefs      []config.EnvReference `json:"env_references,omitempty"`
+	SchemaHint   string                `json:"schema_hint,omitempty"`
+	Lines        []string              `json:"lines"`
 }
 
 func (s *Service) ConfigCheck(ctx context.Context, opts ConfigCheckOptions) (ConfigCheckReport, error) {
@@ -35,38 +36,52 @@ func (s *Service) ConfigCheck(ctx context.Context, opts ConfigCheckOptions) (Con
 	if configPath == "" {
 		configPath = filepath.Join(repoRoot, config.DefaultConfigRelPath)
 	}
+	envRefs, envErr := config.ReadEnvReferences(configPath)
+	if envErr != nil {
+		return ConfigCheckReport{}, envErr
+	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
+		lines := []string{
+			"ROOM config check",
+			fmt.Sprintf("Repo: %s", repoRoot),
+			fmt.Sprintf("Config source: %s", configPath),
+			fmt.Sprintf("Config status: %s", configStatusLabel(configPath)),
+			fmt.Sprintf("Config parse failed: %v", err),
+		}
+		if envLine := formatEnvReferences(envRefs); envLine != "" {
+			lines = append(lines, fmt.Sprintf("Env patch points: %s", envLine))
+		}
 		return ConfigCheckReport{
 			RepoRoot:     repoRoot,
 			ConfigPath:   configPath,
 			ConfigExists: fsutil.FileExists(configPath),
-			Lines: []string{
-				"ROOM config check",
-				fmt.Sprintf("Repo: %s", repoRoot),
-				fmt.Sprintf("Config source: %s", configPath),
-				fmt.Sprintf("Config status: %s", configStatusLabel(configPath)),
-				fmt.Sprintf("Config parse failed: %v", err),
-			},
+			EnvRefs:      envRefs,
+			Lines:        lines,
 		}, err
 	}
 
 	paths := config.ResolvePaths(repoRoot, configPath, cfg)
 	if err := config.ValidatePaths(paths); err != nil {
+		lines := []string{
+			"ROOM config check",
+			fmt.Sprintf("Repo: %s", repoRoot),
+			fmt.Sprintf("Config source: %s", paths.ConfigPath),
+			fmt.Sprintf("Config status: %s", configStatusLabel(paths.ConfigPath)),
+		}
+		if envLine := formatEnvReferences(envRefs); envLine != "" {
+			lines = append(lines, fmt.Sprintf("Env patch points: %s", envLine))
+		}
+		lines = append(lines, fmt.Sprintf("Config wiring failed: %v", err))
 		return ConfigCheckReport{
 			RepoRoot:     repoRoot,
 			ConfigPath:   paths.ConfigPath,
 			ConfigExists: fsutil.FileExists(paths.ConfigPath),
 			Config:       cfg,
 			Paths:        paths,
-			Lines: []string{
-				"ROOM config check",
-				fmt.Sprintf("Repo: %s", repoRoot),
-				fmt.Sprintf("Config source: %s", paths.ConfigPath),
-				fmt.Sprintf("Config status: %s", configStatusLabel(paths.ConfigPath)),
-				fmt.Sprintf("Config wiring failed: %v", err),
-			},
+			EnvRefs:      envRefs,
+			Lines:        lines,
 		}, err
 	}
 	lines := []string{
@@ -77,6 +92,9 @@ func (s *Service) ConfigCheck(ctx context.Context, opts ConfigCheckOptions) (Con
 		"Config parses cleanly.",
 		fmt.Sprintf("Provider: %s", agent.DisplayName(cfg.Agent.Provider)),
 		fmt.Sprintf("Runs dir: %s", paths.RunsDir),
+	}
+	if envLine := formatEnvReferences(envRefs); envLine != "" {
+		lines = append(lines, fmt.Sprintf("Env patch points: %s", envLine))
 	}
 	schemaSignal, err := inspectSchemaContract(paths.SchemaPath)
 	if err != nil {
@@ -93,6 +111,7 @@ func (s *Service) ConfigCheck(ctx context.Context, opts ConfigCheckOptions) (Con
 		ConfigExists: fsutil.FileExists(paths.ConfigPath),
 		Config:       cfg,
 		Paths:        paths,
+		EnvRefs:      envRefs,
 		SchemaHint:   schemaHint,
 		Lines:        lines,
 	}, nil
