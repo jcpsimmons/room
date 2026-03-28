@@ -1,8 +1,12 @@
 package app
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,6 +35,22 @@ type ExecutionReport struct {
 	Error      string `json:"error,omitempty"`
 }
 
+type progressArtifactEntry struct {
+	RunProgressEvent
+	Error string `json:"error,omitempty"`
+}
+
+type ProgressReport struct {
+	EventCount         int       `json:"event_count"`
+	PulseCount         int       `json:"pulse_count"`
+	LastPhase          string    `json:"last_phase,omitempty"`
+	LastStatus         string    `json:"last_status,omitempty"`
+	FirstEventAt       time.Time `json:"first_event_at,omitempty"`
+	LastEventAt        time.Time `json:"last_event_at,omitempty"`
+	ExecutionElapsedMS int64     `json:"execution_elapsed_ms,omitempty"`
+	RunElapsedMS       int64     `json:"run_elapsed_ms,omitempty"`
+}
+
 func writeExecutionArtifact(path, provider string, execution agent.Execution, startedAt, finishedAt time.Time, runErr error) error {
 	artifact := executionArtifact{
 		Provider:   provider,
@@ -55,6 +75,33 @@ func writeExecutionArtifact(path, provider string, execution agent.Execution, st
 	}
 	data = append(data, '\n')
 	return fsutil.AtomicWriteFile(path, data, 0o644)
+}
+
+func appendProgressArtifact(path string, event RunProgressEvent) (err error) {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := fsutil.EnsureDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, f.Close())
+	}()
+
+	entry := progressArtifactEntry{RunProgressEvent: event}
+	if event.Err != nil {
+		entry.Error = strings.TrimSpace(event.Err.Error())
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(data, '\n'))
+	return err
 }
 
 func readExecutionArtifact(path string) (*executionArtifact, bool, error) {
@@ -90,6 +137,67 @@ func readExecutionArtifactLenient(path string) (*executionArtifact, bool, error,
 	return nil, false, nil, err
 }
 
+func readProgressArtifact(path string) (ProgressReport, bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ProgressReport{}, false, nil
+		}
+		return ProgressReport{}, false, err
+	}
+	defer file.Close()
+
+	var report ProgressReport
+	scanner := bufio.NewScanner(file)
+	const maxLine = 1024 * 1024
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxLine)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var entry progressArtifactEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return ProgressReport{}, false, err
+		}
+		report.EventCount++
+		if entry.Phase == RunProgressPhaseAgentExecutionPulse {
+			report.PulseCount++
+		}
+		if report.FirstEventAt.IsZero() && !entry.EventAt.IsZero() {
+			report.FirstEventAt = entry.EventAt
+		}
+		if !entry.EventAt.IsZero() {
+			report.LastEventAt = entry.EventAt
+		}
+		report.LastPhase = string(entry.Phase)
+		report.LastStatus = strings.TrimSpace(entry.Status)
+		report.ExecutionElapsedMS = entry.ExecutionElapsedMS
+		report.RunElapsedMS = entry.RunElapsedMS
+	}
+	if err := scanner.Err(); err != nil {
+		return ProgressReport{}, false, err
+	}
+	if report.EventCount == 0 {
+		return ProgressReport{}, false, nil
+	}
+	return report, true, nil
+}
+
+func readProgressArtifactLenient(path string) (*ProgressReport, bool, error, error) {
+	report, ok, err := readProgressArtifact(path)
+	if err == nil {
+		return &report, ok, nil, nil
+	}
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) || strings.HasPrefix(err.Error(), "json:") {
+		return nil, false, err, nil
+	}
+	return nil, false, nil, err
+}
+
 func executionReportIfPresent(artifact *executionArtifact, ok bool) *ExecutionReport {
 	if !ok || artifact == nil {
 		return nil
@@ -101,6 +209,38 @@ func executionReportIfPresent(artifact *executionArtifact, ok bool) *ExecutionRe
 		ExitSignal: strings.TrimSpace(artifact.ExitSignal),
 		Error:      strings.TrimSpace(artifact.Error),
 	}
+}
+
+func progressLines(report *ProgressReport, ok bool) []string {
+	if !ok || report == nil {
+		return []string{"Progress trace:", indent("unavailable")}
+	}
+
+	lines := []string{"Progress trace:"}
+	lines = append(lines,
+		indent(fmt.Sprintf("events: %d", report.EventCount)),
+		indent(fmt.Sprintf("pulses: %d", report.PulseCount)),
+		indent(fmt.Sprintf("last phase: %s", emptyIfBlank(report.LastPhase, "unknown"))),
+		indent(fmt.Sprintf("last status: %s", emptyIfBlank(report.LastStatus, "unknown"))),
+	)
+	if !report.FirstEventAt.IsZero() && !report.LastEventAt.IsZero() {
+		lines = append(lines, indent(fmt.Sprintf("trace span: %s", report.LastEventAt.Sub(report.FirstEventAt).Round(100*time.Millisecond))))
+	}
+	if report.ExecutionElapsedMS > 0 {
+		lines = append(lines, indent(fmt.Sprintf("last execution elapsed: %s (%d ms)", time.Duration(report.ExecutionElapsedMS)*time.Millisecond, report.ExecutionElapsedMS)))
+	}
+	if report.RunElapsedMS > 0 {
+		lines = append(lines, indent(fmt.Sprintf("last run elapsed: %s (%d ms)", time.Duration(report.RunElapsedMS)*time.Millisecond, report.RunElapsedMS)))
+	}
+	return lines
+}
+
+func progressReportIfPresent(report *ProgressReport, ok bool) *ProgressReport {
+	if !ok || report == nil {
+		return nil
+	}
+	copy := *report
+	return &copy
 }
 
 func executionLines(artifact *executionArtifact, ok bool) []string {
@@ -134,4 +274,11 @@ func formatExecutionExit(code int, signal string) string {
 	default:
 		return "0"
 	}
+}
+
+func emptyIfBlank(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }

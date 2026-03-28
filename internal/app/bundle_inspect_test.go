@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jcpsimmons/room/internal/agent"
 	"github.com/jcpsimmons/room/internal/git"
@@ -32,6 +33,11 @@ diff --git a/a.txt b/a.txt
 +new
 `))
 	writeExecutionArtifactForTest(t, runDir, 2500, false, 0, "", "")
+	writeProgressArtifactForTest(t, runDir,
+		progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationStart, EventAt: time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC), Status: "running"}},
+		progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseAgentExecutionPulse, EventAt: time.Date(2026, 3, 25, 11, 0, 1, 0, time.UTC), Status: "running", ExecutionElapsedMS: 1000, RunElapsedMS: 1000}},
+		progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationSuccess, EventAt: time.Date(2026, 3, 25, 11, 0, 2, 0, time.UTC), Status: "continue", RunElapsedMS: 2000}},
+	)
 	if err := os.WriteFile(filepath.Join(runDir, "stdout.log"), []byte("stdout\n"), 0o644); err != nil {
 		t.Fatalf("write stdout: %v", err)
 	}
@@ -41,6 +47,7 @@ diff --git a/a.txt b/a.txt
 	if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
 		"prompt.txt",
 		"execution.json",
+		"progress.jsonl",
 		"stdout.log",
 		"stderr.log",
 		"result.json",
@@ -74,10 +81,13 @@ diff --git a/a.txt b/a.txt
 	if report.Execution == nil {
 		t.Fatal("expected execution details")
 	}
+	if report.Progress == nil || report.Progress.EventCount != 3 || report.Progress.PulseCount != 1 {
+		t.Fatalf("progress report = %#v", report.Progress)
+	}
 	if report.Execution.DurationMS != 2500 || report.Execution.TimedOut || report.Execution.ExitCode != 0 || report.Execution.ExitSignal != "" || report.Execution.Error != "" {
 		t.Fatalf("execution report = %#v", report.Execution)
 	}
-	if len(report.Artifacts) != 6 {
+	if len(report.Artifacts) != 7 {
 		t.Fatalf("artifact count = %d", len(report.Artifacts))
 	}
 
@@ -89,8 +99,12 @@ diff --git a/a.txt b/a.txt
 		"duration: 2.5s (2500 ms)",
 		"timed out: false",
 		"exit: 0",
+		"Progress trace:",
+		"events: 3",
+		"pulses: 1",
 		"Manifest artifacts:",
 		"prompt.txt",
+		"progress.jsonl",
 		"result.json",
 		"diff.patch",
 	} {
@@ -166,9 +180,13 @@ diff --git a/a.txt b/a.txt
 	if err := os.WriteFile(filepath.Join(runDir, "stderr.log"), []byte("stderr\n"), 0o644); err != nil {
 		t.Fatalf("write stderr: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(runDir, "progress.jsonl"), []byte("{bad json}\n"), 0o644); err != nil {
+		t.Fatalf("write malformed progress: %v", err)
+	}
 	if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
 		"prompt.txt",
 		"execution.json",
+		"progress.jsonl",
 		"stdout.log",
 		"stderr.log",
 		"result.json",
@@ -195,6 +213,9 @@ diff --git a/a.txt b/a.txt
 	if report.Execution != nil {
 		t.Fatalf("expected unreadable execution to be suppressed, got %#v", report.Execution)
 	}
+	if report.Progress != nil {
+		t.Fatalf("expected unreadable progress to be suppressed, got %#v", report.Progress)
+	}
 	if len(report.BundleIntegrityHints) == 0 {
 		t.Fatal("expected bundle integrity hints")
 	}
@@ -202,7 +223,10 @@ diff --git a/a.txt b/a.txt
 	for _, want := range []string{
 		"Bundle integrity: unverified",
 		"unreadable execution.json",
+		"unreadable progress.jsonl",
 		"Execution:",
+		"unavailable",
+		"Progress trace:",
 		"unavailable",
 	} {
 		if !strings.Contains(joined, want) {

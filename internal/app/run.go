@@ -305,7 +305,9 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		if archiveNote != "" {
 			lines = append(lines, archiveNote)
 		}
-		emitter.Emit(RunProgressEvent{
+		runDir := filepath.Join(paths.RunsDir, fmt.Sprintf("%04d", nextIteration))
+		progressPath := filepath.Join(runDir, "progress.jsonl")
+		iterationStartEvent := RunProgressEvent{
 			Phase:               RunProgressPhaseIterationStart,
 			RepoRoot:            repoRoot,
 			Provider:            provider,
@@ -313,9 +315,10 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			CompletedIterations: completed,
 			Failures:            failures,
 			Iteration:           nextIteration,
+			RunDir:              runDir,
 			CommitEnabled:       commitEnabled,
-		})
-		runDir := filepath.Join(paths.RunsDir, fmt.Sprintf("%04d", nextIteration))
+		}
+		emitter.Emit(iterationStartEvent)
 
 		prepared, err := s.preparePrompt(ctx, repoRoot, cfg, paths, true)
 		if err != nil {
@@ -326,6 +329,9 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		commits := prepared.recentCommits
 		promptBody := prepared.body
 		if err := fsutil.EnsureDir(runDir); err != nil {
+			return RunReport{}, err
+		}
+		if err := appendProgressArtifact(progressPath, iterationStartEvent); err != nil {
 			return RunReport{}, err
 		}
 		promptPath := filepath.Join(runDir, "prompt.txt")
@@ -347,14 +353,11 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, err
 			}
-			if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}, lockRecovery); err != nil {
-				return RunReport{}, err
-			}
 			report.CompletedIterations = completed
 			report.Failures = failures
 			report.LastStatus = snapshot.LastStatus
 			report.LastRunDir = runDir
-			emitter.Emit(RunProgressEvent{
+			successEvent := RunProgressEvent{
 				Phase:               RunProgressPhaseIterationSuccess,
 				RepoRoot:            repoRoot,
 				Provider:            provider,
@@ -367,7 +370,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				Status:              "dry_run",
 				DryRun:              true,
 				CommitEnabled:       commitEnabled,
-			})
+			}
+			emitter.Emit(successEvent)
+			if err := appendProgressArtifact(progressPath, successEvent); err != nil {
+				return RunReport{}, err
+			}
+			if err := writeBundleManifest(runDir, bundleModeDryRun, existingArtifacts(runDir, "prompt.txt", "progress.jsonl"), lockRecovery); err != nil {
+				return RunReport{}, err
+			}
 			if !opts.UntilDone {
 				continue
 			}
@@ -377,7 +387,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		resultPath := filepath.Join(runDir, "result.json")
 		executionPath := filepath.Join(runDir, "execution.json")
 		startedAt := s.now()
-		emitter.Emit(RunProgressEvent{
+		executionStartEvent := RunProgressEvent{
 			Phase:               RunProgressPhaseAgentExecutionStart,
 			RepoRoot:            repoRoot,
 			Provider:            provider,
@@ -389,7 +399,11 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			PromptPath:          promptPath,
 			StartedAt:           startedAt.UTC(),
 			CommitEnabled:       commitEnabled,
-		})
+		}
+		emitter.Emit(executionStartEvent)
+		if err := appendProgressArtifact(progressPath, executionStartEvent); err != nil {
+			return RunReport{}, err
+		}
 		type runnerResult struct {
 			execution agent.Execution
 			err       error
@@ -413,7 +427,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 					runErr = result.err
 					running = false
 				case tickAt := <-ticker.C:
-					emitter.Emit(RunProgressEvent{
+					pulseEvent := RunProgressEvent{
 						Phase:               RunProgressPhaseAgentExecutionPulse,
 						RepoRoot:            repoRoot,
 						Provider:            provider,
@@ -426,7 +440,12 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 						StartedAt:           startedAt.UTC(),
 						ExecutionElapsedMS:  tickAt.Sub(startedAt).Milliseconds(),
 						CommitEnabled:       commitEnabled,
-					})
+					}
+					emitter.Emit(pulseEvent)
+					if err := appendProgressArtifact(progressPath, pulseEvent); err != nil {
+						ticker.Stop()
+						return RunReport{}, err
+					}
 				}
 			}
 			ticker.Stop()
@@ -458,6 +477,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if manifestErr := writeBundleManifest(runDir, bundleModeInterrupted, existingArtifacts(runDir,
 				"prompt.txt",
 				"execution.json",
+				"progress.jsonl",
 				"stdout.log",
 				"stderr.log",
 				"result.json",
@@ -486,6 +506,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if manifestErr := writeBundleManifest(runDir, bundleModeFailed, existingArtifacts(runDir,
 				"prompt.txt",
 				"execution.json",
+				"progress.jsonl",
 				"stdout.log",
 				"stderr.log",
 				"result.json",
@@ -504,7 +525,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			if err := s.saveState(paths.StatePath, snapshot); err != nil {
 				return RunReport{}, errors.Join(runErr, err)
 			}
-			emitter.Emit(RunProgressEvent{
+			failureEvent := RunProgressEvent{
 				Phase:               RunProgressPhaseIterationFailure,
 				RepoRoot:            repoRoot,
 				Provider:            provider,
@@ -524,7 +545,11 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				StartedAt:           startedAt.UTC(),
 				FinishedAt:          finishedAt.UTC(),
 				Duration:            finishedAt.Sub(startedAt),
-			})
+			}
+			emitter.Emit(failureEvent)
+			if err := appendProgressArtifact(progressPath, failureEvent); err != nil {
+				return RunReport{}, err
+			}
 			if note := runFailureNote(runErr); note != "" {
 				lines = append(lines, note)
 			}
@@ -652,6 +677,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
 			"prompt.txt",
 			"execution.json",
+			"progress.jsonl",
 			"stdout.log",
 			"stderr.log",
 			"result.json",
@@ -671,7 +697,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		report.LastStatus = statusValue
 		report.StoppedOnDone = false
 		report.LastRunDir = runDir
-		emitter.Emit(RunProgressEvent{
+		successEvent := RunProgressEvent{
 			Phase:               RunProgressPhaseIterationSuccess,
 			RepoRoot:            repoRoot,
 			Provider:            provider,
@@ -690,7 +716,11 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			StartedAt:           startedAt.UTC(),
 			FinishedAt:          finishedAt.UTC(),
 			Duration:            finishedAt.Sub(startedAt),
-		})
+		}
+		emitter.Emit(successEvent)
+		if err := appendProgressArtifact(progressPath, successEvent); err != nil {
+			return RunReport{}, err
+		}
 
 		if statusValue == "done" && opts.UntilDone {
 			stoppedOnDone = true

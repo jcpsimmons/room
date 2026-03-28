@@ -29,6 +29,7 @@ type BundleReport struct {
 	BundleHint           string                 `json:"bundle_hint,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint  `json:"bundle_integrity_hints,omitempty"`
 	Execution            *ExecutionReport       `json:"execution,omitempty"`
+	Progress             *ProgressReport        `json:"progress,omitempty"`
 	ManifestOK           bool                   `json:"manifest_ok"`
 	Artifacts            []BundleArtifactReport `json:"artifacts,omitempty"`
 	Lines                []string               `json:"lines"`
@@ -82,6 +83,13 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	if executionWarn != nil {
 		appendArtifactDecodeWarning(&assessment, "bundle", "execution.json", executionWarn)
 	}
+	progress, hasProgress, progressWarn, err := readProgressArtifactLenient(filepath.Join(runDir, "progress.jsonl"))
+	if err != nil {
+		return BundleReport{}, err
+	}
+	if progressWarn != nil {
+		appendArtifactDecodeWarning(&assessment, "bundle", "progress.jsonl", progressWarn)
+	}
 
 	report := BundleReport{
 		RepoRoot:             repoRoot,
@@ -92,6 +100,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 		BundleHint:           assessment.Hint,
 		BundleIntegrityHints: assessment.Hints,
 		Execution:            executionReportIfPresent(execution, hasExecution),
+		Progress:             progressReportIfPresent(progress, hasProgress),
 		ManifestOK:           manifestOK && assessment.ManifestOK,
 	}
 
@@ -124,6 +133,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(report.BundleIntegrityHints)))
 	}
 	lines = append(lines, executionLines(execution, hasExecution)...)
+	lines = append(lines, progressLines(progress, hasProgress)...)
 	if manifestOK {
 		lines = append(lines, "Manifest artifacts:")
 		for _, artifact := range report.Artifacts {

@@ -46,6 +46,11 @@ diff --git a/b.txt b/b.txt
 +fresh
 `))
 		writeExecutionArtifactForTest(t, filepath.Join(paths.RunsDir, "0002"), 1250, true, 124, "alarm clock", "provider timed out after waiting on the void")
+		writeProgressArtifactForTest(t, filepath.Join(paths.RunsDir, "0002"),
+			progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationStart, EventAt: time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC), Status: "running"}},
+			progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseAgentExecutionPulse, EventAt: time.Date(2026, 3, 25, 11, 0, 1, 0, time.UTC), Status: "running", ExecutionElapsedMS: 1000, RunElapsedMS: 1000}},
+			progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationSuccess, EventAt: time.Date(2026, 3, 25, 11, 0, 2, 0, time.UTC), Status: "continue", RunElapsedMS: 2000}},
+		)
 
 		report, err := svc.Tail(context.Background(), TailOptions{WorkingDir: repoRoot})
 		if err != nil {
@@ -66,6 +71,9 @@ diff --git a/b.txt b/b.txt
 		if report.Diff.Files != 2 || report.Diff.Added != 3 || report.Diff.Deleted != 1 {
 			t.Fatalf("diff stats = %#v", report.Diff)
 		}
+		if report.Progress == nil || report.Progress.EventCount != 3 || report.Progress.PulseCount != 1 || report.Progress.LastPhase != string(RunProgressPhaseIterationSuccess) {
+			t.Fatalf("progress = %#v", report.Progress)
+		}
 		joined := strings.Join(report.Lines, "\n")
 		for _, want := range []string{
 			"Latest ROOM bundle: " + filepath.Join(paths.RunsDir, "0002"),
@@ -73,6 +81,10 @@ diff --git a/b.txt b/b.txt
 			"timed out: true",
 			"exit: 124 (alarm clock)",
 			"error: provider timed out after waiting on the void",
+			"Progress trace:",
+			"events: 3",
+			"pulses: 1",
+			"last phase: iteration_success",
 			"summary: Signal locked in",
 			"status: continue",
 			"files changed: 2",
@@ -149,6 +161,13 @@ diff --git a/b.txt b/b.txt
 		if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt"}); err != nil {
 			t.Fatalf("write bundle manifest: %v", err)
 		}
+		writeProgressArtifactForTest(t, runDir,
+			progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationStart, EventAt: time.Date(2026, 3, 25, 11, 2, 0, 0, time.UTC), Status: "running"}},
+			progressArtifactEntry{RunProgressEvent: RunProgressEvent{Phase: RunProgressPhaseIterationSuccess, EventAt: time.Date(2026, 3, 25, 11, 2, 1, 0, time.UTC), Status: "dry_run", RunElapsedMS: 1000}},
+		)
+		if err := writeBundleManifest(runDir, bundleModeDryRun, []string{"prompt.txt", "progress.jsonl"}); err != nil {
+			t.Fatalf("rewrite bundle manifest: %v", err)
+		}
 
 		report, err := svc.Tail(context.Background(), TailOptions{WorkingDir: repoRoot})
 		if err != nil {
@@ -159,6 +178,9 @@ diff --git a/b.txt b/b.txt
 		}
 		if report.BundleIntegrity != bundleIntegrityOK {
 			t.Fatalf("bundle integrity = %q", report.BundleIntegrity)
+		}
+		if report.Progress == nil || report.Progress.EventCount != 2 {
+			t.Fatalf("progress = %#v", report.Progress)
 		}
 		joined := strings.Join(report.Lines, "\n")
 		for _, want := range []string{
@@ -224,9 +246,13 @@ diff --git a/b.txt b/b.txt
 		if err := os.WriteFile(filepath.Join(runDir, "stderr.log"), nil, 0o644); err != nil {
 			t.Fatalf("write stderr: %v", err)
 		}
+		if err := os.WriteFile(filepath.Join(runDir, "progress.jsonl"), []byte("{bad json}\n"), 0o644); err != nil {
+			t.Fatalf("write malformed progress: %v", err)
+		}
 		if err := writeBundleManifest(runDir, bundleModeExecuted, []string{
 			"prompt.txt",
 			"execution.json",
+			"progress.jsonl",
 			"stdout.log",
 			"stderr.log",
 			"result.json",
@@ -256,8 +282,11 @@ diff --git a/b.txt b/b.txt
 			"Bundle integrity: unverified",
 			"unreadable result.json",
 			"unreadable execution.json",
+			"unreadable progress.jsonl",
 			"Result:",
 			"Execution:",
+			"Progress trace:",
+			"unavailable",
 			"unavailable",
 			"files changed: 1",
 		} {
@@ -317,10 +346,27 @@ func writeExecutionArtifactForTest(t *testing.T, runDir string, durationMS int64
 	}
 }
 
+func writeProgressArtifactForTest(t *testing.T, runDir string, entries ...progressArtifactEntry) {
+	t.Helper()
+
+	var lines []byte
+	for _, entry := range entries {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatalf("marshal progress artifact: %v", err)
+		}
+		lines = append(lines, data...)
+		lines = append(lines, '\n')
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "progress.jsonl"), lines, 0o644); err != nil {
+		t.Fatalf("write progress artifact: %v", err)
+	}
+}
+
 type gitClientForTailTest struct{}
 
-func (gitClientForTailTest) IsRepo(context.Context, string) (bool, error)        { return true, nil }
-func (gitClientForTailTest) Root(_ context.Context, dir string) (string, error)  { return dir, nil }
+func (gitClientForTailTest) IsRepo(context.Context, string) (bool, error)       { return true, nil }
+func (gitClientForTailTest) Root(_ context.Context, dir string) (string, error) { return dir, nil }
 func (gitClientForTailTest) CommitIdentity(context.Context, string) (string, error) {
 	return "Test User <test@example.com>", nil
 }

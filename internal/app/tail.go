@@ -30,6 +30,7 @@ type TailReport struct {
 	BundleRecovery       string                `json:"bundle_recovery,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint `json:"bundle_integrity_hints,omitempty"`
 	Execution            *ExecutionReport      `json:"execution,omitempty"`
+	Progress             *ProgressReport       `json:"progress,omitempty"`
 	Prompt               string                `json:"prompt"`
 	Result               *agent.Result         `json:"result,omitempty"`
 	Diff                 git.DiffStats         `json:"diff"`
@@ -75,6 +76,13 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if executionWarn != nil {
 		appendArtifactDecodeWarning(&assessment, "newest bundle", "execution.json", executionWarn)
 	}
+	progress, hasProgress, progressWarn, err := readProgressArtifactLenient(filepath.Join(runDir, "progress.jsonl"))
+	if err != nil {
+		return TailReport{}, err
+	}
+	if progressWarn != nil {
+		appendArtifactDecodeWarning(&assessment, "newest bundle", "progress.jsonl", progressWarn)
+	}
 	stats, hasStats, err := readTailDiffStats(filepath.Join(runDir, "diff.patch"))
 	if err != nil {
 		return TailReport{}, err
@@ -95,6 +103,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		lines = append(lines, fmt.Sprintf("Stale-lock recovery: %s", assessment.Recovery))
 	}
 	lines = append(lines, executionLines(execution, hasExecution)...)
+	lines = append(lines, progressLines(progress, hasProgress)...)
 	lines = append(lines,
 		"Prompt:",
 	)
@@ -135,6 +144,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		BundleRecovery:       assessment.Recovery,
 		BundleIntegrityHints: assessment.Hints,
 		Execution:            executionReportIfPresent(execution, hasExecution),
+		Progress:             progressReportIfPresent(progress, hasProgress),
 		Prompt:               strings.TrimSpace(string(promptBody)),
 		Result:               resultIfPresent(result, hasResult),
 		Diff:                 statsIfPresent(stats, hasStats),

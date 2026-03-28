@@ -445,9 +445,9 @@ func TestRunFailsBeforeExecutionWhenCommitIdentityIsMissing(t *testing.T) {
 	}
 	svc := NewService(Dependencies{
 		Git: &fakeGit{
-			root:       repoRoot,
-			dirtySeq:   []bool{false},
-			commitErr:  errors.New("git author identity is unavailable: no name was given and auto-detection is disabled"),
+			root:      repoRoot,
+			dirtySeq:  []bool{false},
+			commitErr: errors.New("git author identity is unavailable: no name was given and auto-detection is disabled"),
 		},
 		Now:       fixedClock(),
 		Version:   version.Info{Version: "dev"},
@@ -1163,7 +1163,7 @@ func TestRunSurfacesClaudeWrapperDrift(t *testing.T) {
 	for _, artifact := range manifest.Artifacts {
 		gotArtifacts = append(gotArtifacts, artifact.Name)
 	}
-	wantArtifacts := []string{"execution.json", "prompt.txt", "stderr.log", "stdout.log"}
+	wantArtifacts := []string{"execution.json", "progress.jsonl", "prompt.txt", "stderr.log", "stdout.log"}
 	if strings.Join(gotArtifacts, ",") != strings.Join(wantArtifacts, ",") {
 		t.Fatalf("manifest artifacts = %#v", gotArtifacts)
 	}
@@ -1593,6 +1593,98 @@ func TestRunRefreshesDriftedSchemaContract(t *testing.T) {
 	}
 	if string(refreshed) != string(agent.DefaultSchema()) {
 		t.Fatal("schema.json was not refreshed to the embedded contract")
+	}
+}
+
+func TestRunWritesProgressTraceArtifact(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	originalHeartbeat := runHeartbeatInterval
+	runHeartbeatInterval = 10 * time.Millisecond
+	defer func() {
+		runHeartbeatInterval = originalHeartbeat
+	}()
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runFn: func(_ context.Context, _ agent.Prompt, _ agent.Schema, _ agent.RunOptions, outputPath string) (agent.Execution, error) {
+			time.Sleep(35 * time.Millisecond)
+			result := agent.Result{
+				Summary:         "Printed the hidden pulse train",
+				NextInstruction: "Patch another subsystem",
+				Status:          "continue",
+				CommitMessage:   "record pulse trace",
+			}
+			data, err := json.Marshal(result)
+			if err != nil {
+				return agent.Execution{}, err
+			}
+			if err := os.WriteFile(outputPath, append(data, '\n'), 0o644); err != nil {
+				return agent.Execution{}, err
+			}
+			return agent.Execution{
+				Result:     result,
+				Command:    []string{"codex", "exec"},
+				DurationMS: 35,
+			}, nil
+		},
+	}
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:     repoRoot,
+			dirtySeq: []bool{false},
+			diffSeq:  []string{""},
+			statsSeq: []git.DiffStats{{}},
+		},
+		Providers: testProviders(runner, nil),
+		Now:       time.Now,
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		NoCommit:   true,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	progress, ok, err := readProgressArtifact(filepath.Join(report.LastRunDir, "progress.jsonl"))
+	if err != nil {
+		t.Fatalf("read progress artifact: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected progress artifact")
+	}
+	if progress.EventCount < 4 {
+		t.Fatalf("event count = %d, want at least 4", progress.EventCount)
+	}
+	if progress.PulseCount < 2 {
+		t.Fatalf("pulse count = %d, want at least 2", progress.PulseCount)
+	}
+
+	manifest, ok, _, err := readBundleManifest(report.LastRunDir)
+	if err != nil {
+		t.Fatalf("read bundle manifest: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected bundle manifest")
+	}
+	found := false
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Name == "progress.jsonl" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("manifest artifacts = %#v, want progress.jsonl", manifest.Artifacts)
+	}
+	if _, err := os.Stat(filepath.Join(paths.RunsDir, "0001", "progress.jsonl")); err != nil {
+		t.Fatalf("stat progress artifact: %v", err)
 	}
 }
 
