@@ -1,189 +1,247 @@
 package ui
 
 import (
+	"fmt"
 	"math"
-	"math/rand"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jcpsimmons/room/internal/audio"
 )
 
-// fieldCharge is a point source/sink in the electromagnetic field.
-type fieldCharge struct {
-	x, y       float64
-	vx, vy     float64
-	strength   float64 // positive = source, negative = sink
-	fadeEpoch  float64 // seconds for appearance/disappearance cycle
-	fadePhase  float64
+type fluxNode struct {
+	label string
+	x, y  int
+	color lipgloss.Color
 }
 
-// fluxTopology visualizes electromagnetic field lines from moving charges.
+type fluxPulse struct {
+	from, to int
+	progress float64
+	speed    float64
+	color    lipgloss.Color
+	glyph    string
+}
+
+type fluxFault struct {
+	node  int
+	age   float64
+	ttl   float64
+	color lipgloss.Color
+	glyph string
+}
+
+type fluxCell struct {
+	glyph string
+	color lipgloss.Color
+}
+
 type fluxTopology struct {
-	charges []fieldCharge
-	gridW   int
-	gridH   int
-	elapsed float64
-	epoch   float64 // master envelope (1800-6000s = 30-100 min)
-	rng     *rand.Rand
+	nodes           []fluxNode
+	pulses          []fluxPulse
+	faults          []fluxFault
+	gridW           int
+	gridH           int
+	elapsed         float64
+	lastPhase       string
+	lastStatus      string
+	lastIteration   int
+	lastLatencyMS   int64
+	lastRuntimeMS   int64
+	lastRunMS       int64
+	eventCount      int
+	pulseCount      int
+	failureCount    int
+	pivotCount      int
+	completionCount int
 }
 
 func newFluxTopology(w, h int) fluxTopology {
-	r := rand.New(rand.NewSource(271))
-	charges := []fieldCharge{
-		{
-			x: float64(w) * 0.3, y: float64(h) * 0.4,
-			vx: 0.03, vy: 0.01,
-			strength: 1.0,
-			fadeEpoch: float64(1800 + r.Intn(4200)),
-			fadePhase: 0,
-		},
-		{
-			x: float64(w) * 0.7, y: float64(h) * 0.6,
-			vx: -0.02, vy: 0.015,
-			strength: -0.8,
-			fadeEpoch: float64(2400 + r.Intn(3600)),
-			fadePhase: math.Pi * 0.7,
-		},
-		{
-			x: float64(w) * 0.5, y: float64(h) * 0.3,
-			vx: 0.01, vy: -0.02,
-			strength: 0.6,
-			fadeEpoch: float64(900 + r.Intn(5100)),
-			fadePhase: math.Pi * 1.3,
-		},
+	if w < 14 {
+		w = 14
+	}
+	if h < 6 {
+		h = 6
+	}
+	x := func(ratio float64) int {
+		return clampInt(int(math.Round(ratio*float64(w-1))), 0, w-1)
+	}
+	y := func(ratio float64) int {
+		return clampInt(int(math.Round(ratio*float64(h-1))), 0, h-1)
 	}
 	return fluxTopology{
-		charges: charges,
-		gridW:   w,
-		gridH:   h,
-		epoch:   float64(1800 + r.Intn(4200)),
-		rng:     r,
+		gridW: w,
+		gridH: h,
+		nodes: []fluxNode{
+			{label: "IN", x: x(0.05), y: y(0.5), color: accentCyan},
+			{label: "PROMPT", x: x(0.28), y: y(0.1), color: accentPink},
+			{label: "AGENT", x: x(0.5), y: y(0.5), color: accentGold},
+			{label: "VERIFY", x: x(0.72), y: y(0.9), color: accentLime},
+			{label: "TAPE", x: x(0.95), y: y(0.5), color: accentViolet},
+		},
 	}
+}
+
+func (ft *fluxTopology) ingest(ev ProgressEvent) {
+	ft.eventCount++
+	ft.lastIteration = ev.Iteration
+	ft.lastStatus = string(ev.Kind)
+	if status := metaString(ev.Meta, "status"); status != "" {
+		ft.lastStatus = status
+	}
+	ft.lastPhase = metaString(ev.Meta, "phase")
+	if value := metaInt64(ev.Meta, "phase_latency_ms"); value > 0 {
+		ft.lastLatencyMS = value
+	}
+	if value := metaInt64(ev.Meta, "execution_elapsed_ms"); value > 0 {
+		ft.lastRuntimeMS = value
+	}
+	if value := metaInt64(ev.Meta, "run_elapsed_ms"); value > 0 {
+		ft.lastRunMS = value
+	}
+
+	switch ev.Kind {
+	case ProgressFailure:
+		ft.failureCount++
+	case ProgressPivot:
+		ft.pivotCount++
+	case ProgressDone:
+		ft.completionCount++
+	}
+
+	ft.spawnForEvent(ev)
+}
+
+func (ft *fluxTopology) spawnForEvent(ev ProgressEvent) {
+	switch metaString(ev.Meta, "phase") {
+	case "run_start":
+		ft.addPulse(0, 1, accentCyan, "•", 0.8)
+	case "iteration_start":
+		ft.addPulse(1, 2, accentPink, "•", 1.0)
+	case "agent_execution_start":
+		ft.addPulse(2, 3, accentGold, "◦", 1.0)
+	case "agent_execution_pulse":
+		ft.pulseCount++
+		glyph := "≈"
+		color := accentGold
+		if ft.lastRuntimeMS >= 15000 {
+			glyph = "≋"
+			color = accentOrange
+		}
+		ft.addPulse(2, 2, color, glyph, 0.55)
+	case "iteration_success":
+		ft.addPulse(3, 4, accentLime, "•", 1.2)
+		switch ev.Kind {
+		case ProgressPivot:
+			ft.addFault(4, accentViolet, "⟲", 3.2)
+		case ProgressDone:
+			ft.addFault(4, accentLime, "◎", 3.6)
+		}
+	case "iteration_failure":
+		ft.addPulse(2, 3, accentRed, "×", 0.85)
+		ft.addFault(3, accentRed, "!", 4.0)
+	case "run_finish":
+		if ev.Kind == ProgressFailure {
+			ft.addFault(4, accentRed, "!", 3.5)
+			return
+		}
+		ft.addPulse(4, 0, accentViolet, "◦", 0.7)
+	}
+}
+
+func (ft *fluxTopology) addPulse(from, to int, color lipgloss.Color, glyph string, speed float64) {
+	if from < 0 || from >= len(ft.nodes) || to < 0 || to >= len(ft.nodes) {
+		return
+	}
+	ft.pulses = append(ft.pulses, fluxPulse{
+		from:     from,
+		to:       to,
+		progress: 0,
+		speed:    speed,
+		color:    color,
+		glyph:    glyph,
+	})
+}
+
+func (ft *fluxTopology) addFault(node int, color lipgloss.Color, glyph string, ttl float64) {
+	if node < 0 || node >= len(ft.nodes) {
+		return
+	}
+	ft.faults = append(ft.faults, fluxFault{
+		node:  node,
+		ttl:   ttl,
+		color: color,
+		glyph: glyph,
+	})
 }
 
 func (ft *fluxTopology) step(dt float64) {
 	ft.elapsed += dt
 
-	for i := range ft.charges {
-		c := &ft.charges[i]
-
-		// Brownian drift.
-		c.vx += (ft.rng.Float64()*2 - 1) * 0.005 * dt
-		c.vy += (ft.rng.Float64()*2 - 1) * 0.005 * dt
-
-		// Damping.
-		c.vx *= 0.999
-		c.vy *= 0.999
-
-		c.x += c.vx
-		c.y += c.vy
-
-		// Soft bounce off edges.
-		margin := 1.0
-		if c.x < margin {
-			c.x = margin
-			c.vx = math.Abs(c.vx)
+	alivePulses := ft.pulses[:0]
+	for _, pulse := range ft.pulses {
+		pulse.progress += dt * pulse.speed
+		if pulse.progress < 1.05 {
+			alivePulses = append(alivePulses, pulse)
 		}
-		if c.x > float64(ft.gridW)-margin-1 {
-			c.x = float64(ft.gridW) - margin - 1
-			c.vx = -math.Abs(c.vx)
-		}
-		if c.y < margin {
-			c.y = margin
-			c.vy = math.Abs(c.vy)
-		}
-		if c.y > float64(ft.gridH)-margin-1 {
-			c.y = float64(ft.gridH) - margin - 1
-			c.vy = -math.Abs(c.vy)
-		}
-
-		// Fade envelope.
-		c.fadePhase += dt * 2 * math.Pi / c.fadeEpoch
 	}
-}
+	ft.pulses = alivePulses
 
-func (ft *fluxTopology) fieldAt(x, y float64) (float64, float64, float64) {
-	// Returns (Ex, Ey, magnitude) at point (x,y).
-	ex, ey := 0.0, 0.0
-	for _, c := range ft.charges {
-		fade := 0.5 + 0.5*math.Sin(c.fadePhase)
-		eff := c.strength * fade
-
-		dx := x - c.x
-		dy := y - c.y
-		r2 := dx*dx + dy*dy
-		if r2 < 0.5 {
-			r2 = 0.5
+	aliveFaults := ft.faults[:0]
+	for _, fault := range ft.faults {
+		fault.age += dt
+		if fault.age < fault.ttl {
+			aliveFaults = append(aliveFaults, fault)
 		}
-		r := math.Sqrt(r2)
-		// Coulomb-like: E ∝ q/r²
-		ex += eff * dx / (r * r2)
-		ey += eff * dy / (r * r2)
 	}
-	mag := math.Sqrt(ex*ex + ey*ey)
-	return ex, ey, mag
+	ft.faults = aliveFaults
 }
 
 func (ft *fluxTopology) render() string {
-	// Direction arrows: 8 directions + center dot.
-	arrows := []string{"→", "↗", "↑", "↖", "←", "↙", "↓", "↘"}
+	grid := make([][]fluxCell, ft.gridH)
+	for y := range grid {
+		grid[y] = make([]fluxCell, ft.gridW)
+	}
+
+	for i := 0; i < len(ft.nodes)-1; i++ {
+		ft.plotLine(grid, ft.nodes[i].x, ft.nodes[i].y, ft.nodes[i+1].x, ft.nodes[i+1].y, "·", accentViolet)
+	}
+	ft.plotLine(grid, ft.nodes[len(ft.nodes)-1].x, ft.nodes[len(ft.nodes)-1].y, ft.nodes[0].x, ft.nodes[0].y, "·", accentRed)
+
+	for _, pulse := range ft.pulses {
+		from := ft.nodes[pulse.from]
+		to := ft.nodes[pulse.to]
+		x := lerpInt(from.x, to.x, pulse.progress)
+		y := lerpInt(from.y, to.y, pulse.progress)
+		grid[y][x] = fluxCell{glyph: pulse.glyph, color: pulse.color}
+	}
+
+	for _, fault := range ft.faults {
+		node := ft.nodes[fault.node]
+		y := node.y - 1
+		if y < 0 {
+			y = node.y + 1
+		}
+		glyph := fault.glyph
+		if fault.ttl-fault.age < 1 && glyph == "!" {
+			glyph = "·"
+		}
+		grid[y][node.x] = fluxCell{glyph: glyph, color: fault.color}
+	}
+
+	for _, node := range ft.nodes {
+		grid[node.y][node.x] = fluxCell{glyph: "◉", color: node.color}
+	}
 
 	var b strings.Builder
 	for y := 0; y < ft.gridH; y++ {
 		for x := 0; x < ft.gridW; x++ {
-			fx := float64(x)
-			fy := float64(y)
-
-			// Check if a charge is near this cell.
-			isCharge := false
-			for _, c := range ft.charges {
-				fade := 0.5 + 0.5*math.Sin(c.fadePhase)
-				if fade < 0.1 {
-					continue
-				}
-				if math.Abs(fx-c.x) < 0.6 && math.Abs(fy-c.y) < 0.6 {
-					if c.strength > 0 {
-						b.WriteString(accentBadge(accentGold).Render("◆"))
-					} else {
-						b.WriteString(accentBadge(accentViolet).Render("◇"))
-					}
-					isCharge = true
-					break
-				}
-			}
-			if isCharge {
-				continue
-			}
-
-			ex, ey, mag := ft.fieldAt(fx, fy)
-
-			if mag < 0.01 {
+			c := grid[y][x]
+			if c.glyph == "" {
 				b.WriteString(subtitleStyle().Render(" "))
 				continue
 			}
-
-			// Quantize direction to 8 compass points.
-			angle := math.Atan2(-ey, ex) // screen Y is inverted
-			if angle < 0 {
-				angle += 2 * math.Pi
-			}
-			di := int(math.Round(angle/(math.Pi/4))) % 8
-
-			// Color by field strength.
-			var color lipgloss.Color
-			switch {
-			case mag > 0.8:
-				color = accentGold
-			case mag > 0.3:
-				color = accentOrange
-			case mag > 0.1:
-				color = accentCyan
-			default:
-				color = accentRed
-			}
-
-			b.WriteString(bulletStyle(color).Render(arrows[di]))
+			b.WriteString(bulletStyle(c.color).Render(c.glyph))
 		}
 		if y < ft.gridH-1 {
 			b.WriteByte('\n')
@@ -192,33 +250,126 @@ func (ft *fluxTopology) render() string {
 	return b.String()
 }
 
+func (ft *fluxTopology) summaryLines() []string {
+	latency := formatFluxDuration(ft.lastLatencyMS)
+	runtime := formatFluxDuration(ft.lastRuntimeMS)
+	runElapsed := formatFluxDuration(ft.lastRunMS)
+	phase := strings.ReplaceAll(ft.lastPhase, "_", " ")
+	if phase == "" {
+		phase = "idle"
+	}
+	status := ft.lastStatus
+	if status == "" {
+		status = "listening"
+	}
+
+	lineA := fmt.Sprintf("phase %s  iter %d  status %s", phase, max(ft.lastIteration, 0), status)
+	lineB := fmt.Sprintf("phase-lat %s  carrier %s  run %s", latency, runtime, runElapsed)
+	lineC := fmt.Sprintf("events %d  pulses %d  pivots %d  faults %d  dones %d", ft.eventCount, ft.pulseCount, ft.pivotCount, ft.failureCount, ft.completionCount)
+	return []string{lineA, lineB, lineC}
+}
+
 func (ft *fluxTopology) audioParams() audio.Params {
-	// Master epoch envelope.
-	masterEnv := 0.5 + 0.5*math.Sin(ft.elapsed*2*math.Pi/ft.epoch)
-
-	// Average field magnitude across a few sample points.
-	avgMag := 0.0
-	samples := 0
-	for y := 1; y < ft.gridH; y += 3 {
-		for x := 1; x < ft.gridW; x += 4 {
-			_, _, mag := ft.fieldAt(float64(x), float64(y))
-			avgMag += mag
-			samples++
-		}
+	density := float64(len(ft.pulses)+len(ft.faults)) / 8.0
+	if density > 1 {
+		density = 1
 	}
-	if samples > 0 {
-		avgMag /= float64(samples)
-	}
-
-	// Filtered noise texture: high mod depth + mod freq for noisy timbre.
-	// Resonant frequency follows field strength.
-	freq := 80.0 + avgMag*200.0
-
+	failureBias := math.Min(float64(ft.failureCount)*0.08, 0.35)
+	pivotBias := math.Min(float64(ft.pivotCount)*0.05, 0.2)
+	freq := 110.0 + float64(ft.eventCount%9)*18.0 + density*90.0
+	modDepth := 0.5 + density*2.5 + failureBias*2.0
+	amp := math.Min(0.06+density*0.14+pivotBias*0.06, 0.22)
 	return audio.Params{
 		Freq:     freq,
-		Amp:      masterEnv * math.Min(avgMag*0.8, 0.2),
-		ModFreq:  freq*3.0 + avgMag*100.0,
-		ModDepth: 4.0 + avgMag*6.0, // heavy FM = noise-like
-		Detune:   1.5 + avgMag*3.0,
+		Amp:      amp,
+		ModFreq:  freq * (1.2 + failureBias),
+		ModDepth: modDepth,
+		Detune:   0.12 + pivotBias + failureBias,
 	}
+}
+
+func (ft *fluxTopology) plotLine(grid [][]fluxCell, x0, y0, x1, y1 int, glyph string, color lipgloss.Color) {
+	dx := absInt(x1 - x0)
+	dy := -absInt(y1 - y0)
+	sx := -1
+	if x0 < x1 {
+		sx = 1
+	}
+	sy := -1
+	if y0 < y1 {
+		sy = 1
+	}
+	err := dx + dy
+	for {
+		if y0 >= 0 && y0 < len(grid) && x0 >= 0 && x0 < len(grid[y0]) && grid[y0][x0].glyph == "" {
+			grid[y0][x0] = fluxCell{glyph: glyph, color: color}
+		}
+		if x0 == x1 && y0 == y1 {
+			break
+		}
+		e2 := 2 * err
+		if e2 >= dy {
+			err += dy
+			x0 += sx
+		}
+		if e2 <= dx {
+			err += dx
+			y0 += sy
+		}
+	}
+}
+
+func formatFluxDuration(ms int64) string {
+	if ms <= 0 {
+		return "0ms"
+	}
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return fmt.Sprintf("%.1fs", float64(ms)/1000.0)
+}
+
+func metaString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	value, ok := meta[key]
+	if !ok {
+		return ""
+	}
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func metaInt64(meta map[string]any, key string) int64 {
+	if meta == nil {
+		return 0
+	}
+	switch value := meta[key].(type) {
+	case int:
+		return int64(value)
+	case int64:
+		return value
+	case float64:
+		return int64(value)
+	default:
+		return 0
+	}
+}
+
+func lerpInt(a, b int, t float64) int {
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return clampInt(int(math.Round(float64(a)+(float64(b-a)*t))), 0, max(a, b))
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

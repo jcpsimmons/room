@@ -430,6 +430,7 @@ func (m RunModel) consume(ev ProgressEvent) RunModel {
 	if _, ok := outcomeToneRecipe(ev); ok {
 		m.outcomeCue.trigger(ev)
 	}
+	m.flux.ingest(ev)
 	m.events = append(m.events, ev)
 	if len(m.events) > 10 {
 		m.events = append([]ProgressEvent(nil), m.events[len(m.events)-10:]...)
@@ -801,27 +802,19 @@ func (m RunModel) renderResonancePanel(width, height int) string {
 }
 
 func (m RunModel) renderFluxPanel(width, height int) string {
-	activeCharges := 0
-	for _, c := range m.flux.charges {
-		fade := 0.5 + 0.5*math.Sin(c.fadePhase)
-		if fade > 0.1 {
-			activeCharges++
-		}
-	}
-	epochMin := m.flux.epoch / 60.0
-
 	title := strings.Join([]string{
 		accentBadge(accentViolet).Render(" TOPOLOGY "),
-		subtitleStyle().Render(fmt.Sprintf("%d charges  epoch %.0fmin", activeCharges, epochMin)),
+		subtitleStyle().Render(fmt.Sprintf("%d live paths  %d residual faults", len(m.flux.pulses), len(m.flux.faults))),
 	}, " ")
 
-	body := strings.Join([]string{
+	bodyLines := append([]string{
 		title,
 		"",
 		m.flux.render(),
-	}, "\n")
+		"",
+	}, m.flux.summaryLines()...)
 
-	return renderPanel("FLUX", body, accentViolet, width, height)
+	return renderPanel("FLUX", strings.Join(bodyLines, "\n"), accentViolet, width, height)
 }
 
 func (m RunModel) renderDiagnosticsPanel(width, height int) string {

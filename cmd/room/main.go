@@ -637,6 +637,14 @@ func toUIProgressEvent(event app.RunProgressEvent) ui.ProgressEvent {
 		RepoRoot:      event.RepoRoot,
 		CommitEnabled: event.CommitEnabled,
 		DryRun:        event.DryRun,
+		Meta: map[string]any{
+			"phase":                string(event.Phase),
+			"status":               event.Status,
+			"phase_latency_ms":     event.PhaseLatencyMS,
+			"execution_elapsed_ms": event.ExecutionElapsedMS,
+			"run_elapsed_ms":       event.RunElapsedMS,
+			"failures":             event.Failures,
+		},
 	}
 
 	switch event.Phase {

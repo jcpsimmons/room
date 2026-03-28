@@ -172,6 +172,12 @@ func TestToUIProgressEventMapsExecutionPulse(t *testing.T) {
 	if ev.Detail != "step 4 in flight for 3.2s" {
 		t.Fatalf("detail = %q", ev.Detail)
 	}
+	if got, _ := ev.Meta["phase"].(string); got != "agent_execution_pulse" {
+		t.Fatalf("phase meta = %q", got)
+	}
+	if got, _ := ev.Meta["execution_elapsed_ms"].(int64); got != 3200 {
+		t.Fatalf("execution_elapsed_ms meta = %d", got)
+	}
 }
 
 func TestResolveInitPrompt(t *testing.T) {

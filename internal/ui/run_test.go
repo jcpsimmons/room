@@ -118,3 +118,45 @@ func TestRunModelMuteToggleUpdatesManualAndStatus(t *testing.T) {
 		t.Fatalf("status panel missing muted state:\n%s", status)
 	}
 }
+
+func TestFluxPanelReflectsLiveRunSignal(t *testing.T) {
+	model := NewRunModel(3)
+	model = model.consume(ProgressEvent{
+		Kind:       ProgressStart,
+		Title:      "voltage applied",
+		HasPercent: true,
+		Meta:       map[string]any{"phase": "run_start", "run_elapsed_ms": int64(80)},
+	})
+	model = model.consume(ProgressEvent{
+		Kind:         ProgressMessageKind,
+		Title:        "carrier wave stable",
+		Iteration:    2,
+		HasIteration: true,
+		Meta: map[string]any{
+			"phase":                "agent_execution_pulse",
+			"execution_elapsed_ms": int64(7300),
+			"phase_latency_ms":     int64(5000),
+			"run_elapsed_ms":       int64(9100),
+			"status":               "running",
+		},
+	})
+	model = model.consume(ProgressEvent{
+		Kind:         ProgressFailure,
+		Title:        "step 2 overloaded",
+		Iteration:    2,
+		HasIteration: true,
+		Meta: map[string]any{
+			"phase":            "iteration_failure",
+			"phase_latency_ms": int64(6200),
+			"run_elapsed_ms":   int64(12000),
+			"status":           "failed",
+		},
+	})
+
+	out := model.renderFluxPanel(70, 18)
+	for _, want := range []string{"FLUX", "phase iteration failure", "carrier 7.3s", "faults 1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("flux panel missing %q:\n%s", want, out)
+		}
+	}
+}
