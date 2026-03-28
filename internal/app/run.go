@@ -562,6 +562,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 				return RunReport{}, err
 			}
 		}
+		focusAreas := summarizeRunFocusAreas(ctx, s.git, repoRoot)
 		if err := fsutil.AtomicWriteFile(filepath.Join(runDir, "diff.patch"), []byte(diff), 0o644); err != nil {
 			return RunReport{}, err
 		}
@@ -616,6 +617,7 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 			ChangedFiles: stats.Files,
 			LinesAdded:   stats.Added,
 			LinesDeleted: stats.Deleted,
+			FocusAreas:   focusAreas,
 		}); err != nil {
 			return RunReport{}, err
 		}
@@ -798,4 +800,18 @@ func faultFragment(raw string) string {
 		return fragment
 	}
 	return strings.TrimSpace(fragment[len(fragment)-maxChars:])
+}
+
+func summarizeRunFocusAreas(ctx context.Context, gitClient git.Client, repoRoot string) []string {
+	pathReader, ok := gitClient.(interface {
+		ChangedPaths(context.Context, string) ([]string, error)
+	})
+	if !ok {
+		return nil
+	}
+	paths, err := pathReader.ChangedPaths(ctx, repoRoot)
+	if err != nil {
+		return nil
+	}
+	return prompt.SummarizeFocusAreas(paths, 4)
 }

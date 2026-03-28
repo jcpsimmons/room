@@ -141,7 +141,11 @@ func repeatedFocus(next string, prior []string, summaries []logs.SummaryEntry, c
 			continue
 		}
 		shared := overlappingTokens(tokens, other)
-		if len(shared) < 2 {
+		minShared := 2
+		if len(other) == 1 {
+			minShared = 1
+		}
+		if len(shared) < minShared {
 			continue
 		}
 		for _, token := range shared {
@@ -173,13 +177,18 @@ func informativeTokens(text string) []string {
 	stop := map[string]struct{}{
 		"the": {}, "and": {}, "for": {}, "with": {}, "that": {}, "from": {}, "this": {}, "repo": {}, "repository": {}, "improve": {}, "improvement": {}, "more": {}, "make": {}, "better": {}, "add": {}, "update": {}, "room": {}, "tests": {}, "test": {}, "docs": {}, "documentation": {}, "refactor": {}, "cleanup": {}, "performance": {}, "reliability": {}, "tooling": {}, "developer": {}, "experience": {}, "recent": {}, "runs": {}, "across": {}, "hard": {}, "avoid": {}, "choose": {}, "distinctly": {}, "different": {}, "direction": {}, "validation": {}, "layer": {}, "measure": {}, "angle": {}, "diagnostics": {}, "capability": {}, "accessibility": {}, "issue": {}, "creative": {}, "concrete": {},
 	}
+	allowShort := map[string]struct{}{
+		"ui": {}, "app": {}, "cmd": {}, "tui": {},
+	}
 	var out []string
 	for _, token := range strings.Fields(text) {
-		if len(token) < 4 {
-			continue
-		}
 		if _, ok := stop[token]; ok {
 			continue
+		}
+		if len(token) < 4 {
+			if _, ok := allowShort[token]; !ok {
+				continue
+			}
 		}
 		if !slices.Contains(out, token) {
 			out = append(out, token)
@@ -220,6 +229,7 @@ func focusEvidence(prior []string, summaries []logs.SummaryEntry, commits []git.
 	items = append(items, prior...)
 	for _, summary := range summaries {
 		items = append(items, summary.Summary)
+		items = append(items, summary.FocusAreas...)
 	}
 	for _, commit := range commits {
 		items = append(items, commit.Subject)

@@ -84,6 +84,7 @@ type fakeGit struct {
 	statusShort    string
 	diffSeq        []string
 	statsSeq       []git.DiffStats
+	changedPaths   [][]string
 	commitHashes   []string
 	commitMessages []string
 	recentCommits  []git.Commit
@@ -137,6 +138,14 @@ func (f *fakeGit) DiffAndStats(context.Context, string) (string, git.DiffStats, 
 		f.statsSeq = f.statsSeq[1:]
 	}
 	return diff, stats, nil
+}
+func (f *fakeGit) ChangedPaths(context.Context, string) ([]string, error) {
+	if len(f.changedPaths) == 0 {
+		return nil, nil
+	}
+	value := f.changedPaths[0]
+	f.changedPaths = f.changedPaths[1:]
+	return value, nil
 }
 func (f *fakeGit) CommitAll(_ context.Context, _ string, message string) (string, error) {
 	f.commitMessages = append(f.commitMessages, message)
@@ -652,6 +661,55 @@ func TestRunForcesPivotOnDuplicateInstruction(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "\"provider\": \"codex\"") {
 		t.Fatalf("execution artifact missing provider: %s", string(data))
+	}
+}
+
+func TestRunRecordsFocusAreasInSummaries(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Patched the signal router",
+				NextInstruction: "Swing toward another subsystem",
+				Status:          "continue",
+				CommitMessage:   "patch signal router",
+			},
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:         repoRoot,
+		dirtySeq:     []bool{false},
+		diffSeq:      []string{"diff --git a/a b/a"},
+		statsSeq:     []git.DiffStats{{Files: 3, Added: 9, Deleted: 2}},
+		changedPaths: [][]string{{"internal/app/run.go", "internal/app/status.go", "internal/ui/run.go"}},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	if _, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+		NoCommit:   true,
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	summaries, err := logs.ReadRecentSummaries(paths.SummariesPath, 1)
+	if err != nil {
+		t.Fatalf("read summaries: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %#v", summaries)
+	}
+	if got := summaries[0].FocusAreas; len(got) != 2 || got[0] != "app" || got[1] != "ui" {
+		t.Fatalf("focus areas = %#v", got)
 	}
 }
 

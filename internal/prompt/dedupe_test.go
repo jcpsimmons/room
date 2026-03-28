@@ -71,3 +71,26 @@ func TestDetectStagnationOnRepeatedSubsystemFocusAcrossHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectStagnationOnRepeatedFocusAreasFromChangedFiles(t *testing.T) {
+	t.Parallel()
+
+	result := DetectStagnation(DedupeInput{
+		NextInstruction:   "Patch the ui transport and ui diagnostics path",
+		PriorInstructions: []string{"Leave the app layer alone and push into ui experiments"},
+		RecentSummaries: []logs.SummaryEntry{
+			{Summary: "Shifted the viewport signal", FocusAreas: []string{"ui"}},
+			{Summary: "Retuned the panel renderer", FocusAreas: []string{"ui"}},
+		},
+	})
+
+	if !result.ShouldPivot {
+		t.Fatalf("expected forced pivot")
+	}
+	if got := result.Reasons[0]; got != "repeated subsystem focus across recent runs" {
+		t.Fatalf("reason = %q", got)
+	}
+	if !strings.Contains(result.Replacement, "ui") {
+		t.Fatalf("replacement missing ui avoid-list: %q", result.Replacement)
+	}
+}

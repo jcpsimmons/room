@@ -20,6 +20,7 @@ type SummaryEntry struct {
 	ChangedFiles int       `json:"changed_files"`
 	LinesAdded   int       `json:"lines_added"`
 	LinesDeleted int       `json:"lines_deleted"`
+	FocusAreas   []string  `json:"focus_areas,omitempty"`
 }
 
 func AppendSummary(path string, entry SummaryEntry) (err error) {

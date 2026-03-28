@@ -134,6 +134,10 @@ func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
 	return parseDiffStats(out), nil
 }
 
+func (CLI) ChangedPaths(ctx context.Context, dir string) ([]string, error) {
+	return changedPaths(ctx, dir, true)
+}
+
 func (CLI) CommitAll(ctx context.Context, dir, message string) (string, error) {
 	paths, err := changedPaths(ctx, dir, false)
 	if err != nil {
