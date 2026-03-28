@@ -234,6 +234,11 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	if dirty && !opts.AllowDirty {
 		return RunReport{}, errors.New("repository is dirty; re-run with --allow-dirty to override")
 	}
+	if commitEnabled {
+		if _, err := s.git.CommitIdentity(ctx, repoRoot); err != nil {
+			return RunReport{}, fmt.Errorf("git commit identity is not configured; set user.name and user.email or re-run with --no-commit: %w", err)
+		}
+	}
 
 	provider, providerVersion, err := s.agentVersion(ctx, cfg)
 	if err != nil {

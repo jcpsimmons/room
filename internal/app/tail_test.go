@@ -321,6 +321,9 @@ type gitClientForTailTest struct{}
 
 func (gitClientForTailTest) IsRepo(context.Context, string) (bool, error)        { return true, nil }
 func (gitClientForTailTest) Root(_ context.Context, dir string) (string, error)  { return dir, nil }
+func (gitClientForTailTest) CommitIdentity(context.Context, string) (string, error) {
+	return "Test User <test@example.com>", nil
+}
 func (gitClientForTailTest) StatusShort(context.Context, string) (string, error) { return "", nil }
 func (gitClientForTailTest) IsDirty(context.Context, string) (bool, error)       { return false, nil }
 func (gitClientForTailTest) Diff(context.Context, string) (string, error)        { return "", nil }

@@ -97,6 +97,27 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 	} else {
 		checks = append(checks, DoctorCheck{Name: "config_paths", OK: true, Message: "resolved ROOM paths do not collide"})
 	}
+	if cfg.Run.Commit {
+		if identity, err := s.git.CommitIdentity(ctx, repoRoot); err != nil {
+			checks = append(checks, DoctorCheck{
+				Name:    "git_commit_identity",
+				OK:      false,
+				Message: fmt.Sprintf("git commit identity missing; set user.name and user.email or disable commits: %v", err),
+			})
+		} else {
+			checks = append(checks, DoctorCheck{
+				Name:    "git_commit_identity",
+				OK:      true,
+				Message: fmt.Sprintf("git commit identity is ready: %s", identity),
+			})
+		}
+	} else {
+		checks = append(checks, DoctorCheck{
+			Name:    "git_commit_identity",
+			OK:      true,
+			Message: "git commit identity is not required while run.commit=false",
+		})
+	}
 	if ignoreOK, err := gitInfoExcludeProtectsRoom(repoRoot); err != nil {
 		checks = append(checks, DoctorCheck{Name: "git_info_exclude", OK: false, Message: err.Error()})
 	} else if ignoreOK {

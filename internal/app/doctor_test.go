@@ -186,6 +186,43 @@ func TestDoctorReportsGitInfoExcludeProtection(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsMissingGitCommitIdentity(t *testing.T) {
+	repoRoot := t.TempDir()
+	runGit(t, repoRoot, "init")
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:      repoRoot,
+			commitErr: errors.New("git author identity is unavailable: no name was given and auto-detection is disabled"),
+		},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "git_commit_identity" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected missing commit identity to fail, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "set user.name and user.email") {
+			t.Fatalf("unexpected commit identity message: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected git_commit_identity check, got %#v", report.Checks)
+	}
+}
+
 func TestDoctorReportsWorktreeGitExcludeProtection(t *testing.T) {
 	repoRoot := t.TempDir()
 	_, _ = prepareInitializedRepo(t, repoRoot)

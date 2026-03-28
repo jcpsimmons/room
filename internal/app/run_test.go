@@ -80,6 +80,8 @@ func (f *fakeRunner) Run(ctx context.Context, prompt agent.Prompt, schema agent.
 
 type fakeGit struct {
 	root           string
+	commitIdentity string
+	commitErr      error
 	dirtySeq       []bool
 	statusShort    string
 	diffSeq        []string
@@ -96,6 +98,15 @@ type fakeGit struct {
 
 func (f *fakeGit) IsRepo(context.Context, string) (bool, error) { return true, nil }
 func (f *fakeGit) Root(context.Context, string) (string, error) { return f.root, nil }
+func (f *fakeGit) CommitIdentity(context.Context, string) (string, error) {
+	if f.commitErr != nil {
+		return "", f.commitErr
+	}
+	if strings.TrimSpace(f.commitIdentity) != "" {
+		return f.commitIdentity, nil
+	}
+	return "Test User <test@example.com>", nil
+}
 func (f *fakeGit) StatusShort(context.Context, string) (string, error) {
 	return f.statusShort, nil
 }
@@ -410,6 +421,47 @@ func TestRunRejectsBlankInstructionFile(t *testing.T) {
 		t.Fatal("expected blank instruction failure")
 	}
 	if !strings.Contains(err.Error(), "instruction.txt is blank") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner should not be called, got %d calls", runner.calls)
+	}
+}
+
+func TestRunFailsBeforeExecutionWhenCommitIdentityIsMissing(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, _ = prepareInitializedRepo(t, repoRoot)
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Should never run",
+				NextInstruction: "Should never run",
+				Status:          "continue",
+				CommitMessage:   "should never run",
+			},
+		}},
+	}
+	svc := NewService(Dependencies{
+		Git: &fakeGit{
+			root:       repoRoot,
+			dirtySeq:   []bool{false},
+			commitErr:  errors.New("git author identity is unavailable: no name was given and auto-detection is disabled"),
+		},
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+		Providers: testProviders(runner, nil),
+	})
+
+	_, err := svc.Run(context.Background(), RunOptions{
+		WorkingDir: repoRoot,
+		Iterations: 1,
+	})
+	if err == nil {
+		t.Fatal("expected missing commit identity failure")
+	}
+	if !strings.Contains(err.Error(), "git commit identity is not configured") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if runner.calls != 0 {

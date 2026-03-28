@@ -23,6 +23,38 @@ func TestNormalizeCommitMessage(t *testing.T) {
 	}
 }
 
+func TestCommitIdentityReportsAuthorIdentity(t *testing.T) {
+	t.Parallel()
+
+	repo := setupGitRepo(t)
+	client := NewClient()
+
+	identity, err := client.CommitIdentity(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("commit identity: %v", err)
+	}
+	if identity != "Test User <test@example.com>" {
+		t.Fatalf("identity = %q", identity)
+	}
+}
+
+func TestCommitIdentityFailsWithoutConfiguredAuthor(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "missing-gitconfig"))
+	t.Setenv("GIT_AUTHOR_NAME", "")
+	t.Setenv("GIT_AUTHOR_EMAIL", "")
+	t.Setenv("GIT_COMMITTER_NAME", "")
+	t.Setenv("GIT_COMMITTER_EMAIL", "")
+	runGit(t, repo, "init")
+	client := NewClient()
+
+	if _, err := client.CommitIdentity(context.Background(), repo); err == nil {
+		t.Fatal("expected commit identity failure")
+	}
+}
+
 func TestRoomDirectoryIsIgnoredByStatusAndDiff(t *testing.T) {
 	t.Parallel()
 

@@ -19,6 +19,7 @@ import (
 type Client interface {
 	IsRepo(ctx context.Context, dir string) (bool, error)
 	Root(ctx context.Context, dir string) (string, error)
+	CommitIdentity(ctx context.Context, dir string) (string, error)
 	StatusShort(ctx context.Context, dir string) (string, error)
 	IsDirty(ctx context.Context, dir string) (bool, error)
 	Diff(ctx context.Context, dir string) (string, error)
@@ -70,6 +71,23 @@ func (CLI) Root(ctx context.Context, dir string) (string, error) {
 		return "", err
 	}
 	return filepath.Clean(strings.TrimSpace(out)), nil
+}
+
+func (CLI) CommitIdentity(ctx context.Context, dir string) (string, error) {
+	out, err := run(ctx, dir, "var", "GIT_AUTHOR_IDENT")
+	if err != nil {
+		return "", fmt.Errorf("git author identity is unavailable: %w", err)
+	}
+	line := strings.TrimSpace(out)
+	end := strings.LastIndex(line, ">")
+	if end < 0 {
+		return "", fmt.Errorf("git author identity is malformed: %q", line)
+	}
+	identity := strings.TrimSpace(line[:end+1])
+	if identity == "" || !strings.Contains(identity, "<") {
+		return "", fmt.Errorf("git author identity is malformed: %q", line)
+	}
+	return identity, nil
 }
 
 func (CLI) StatusShort(ctx context.Context, dir string) (string, error) {
