@@ -298,8 +298,11 @@ func TestDoctorJSONEncoding(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload["schema_version"] != float64(doctorJSONSchemaVersion) {
+	if payload["schema_version"] != float64(commandJSONSchemaVersion) {
 		t.Fatalf("schema_version = %v", payload["schema_version"])
+	}
+	if payload["command"] != "doctor" {
+		t.Fatalf("command = %v", payload["command"])
 	}
 	if payload["type"] != "result" {
 		t.Fatalf("type = %v", payload["type"])
@@ -336,8 +339,11 @@ func TestStatusJSONEncoding(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload["schema_version"] != float64(doctorJSONSchemaVersion) {
+	if payload["schema_version"] != float64(commandJSONSchemaVersion) {
 		t.Fatalf("schema_version = %v", payload["schema_version"])
+	}
+	if payload["command"] != "status" {
+		t.Fatalf("command = %v", payload["command"])
 	}
 	if payload["type"] != "result" {
 		t.Fatalf("type = %v", payload["type"])
@@ -352,6 +358,83 @@ func TestStatusJSONEncoding(t *testing.T) {
 	}
 	if result["repo_root"] != report.RepoRoot {
 		t.Fatalf("repo_root = %v", result["repo_root"])
+	}
+}
+
+func TestCommandJSONEncoding(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		write   func(*bytes.Buffer) error
+	}{
+		{
+			name:    "inspect",
+			command: "inspect",
+			write: func(buf *bytes.Buffer) error {
+				return writeInspectJSON(buf, app.InspectReport{RepoRoot: "/tmp/repo", Prompt: "patch the relay"}, nil)
+			},
+		},
+		{
+			name:    "config",
+			command: "config",
+			write: func(buf *bytes.Buffer) error {
+				return writeConfigJSON(buf, app.ConfigReport{RepoRoot: "/tmp/repo", ConfigPath: "/tmp/repo/.room/config.toml"}, nil)
+			},
+		},
+		{
+			name:    "config-check",
+			command: "config-check",
+			write: func(buf *bytes.Buffer) error {
+				return writeConfigCheckJSON(buf, app.ConfigCheckReport{RepoRoot: "/tmp/repo", ConfigPath: "/tmp/repo/.room/config.toml"}, nil)
+			},
+		},
+		{
+			name:    "bundle",
+			command: "bundle",
+			write: func(buf *bytes.Buffer) error {
+				return writeBundleJSON(buf, app.BundleReport{RepoRoot: "/tmp/repo", RunDir: "/tmp/repo/.room/runs/0007"}, nil)
+			},
+		},
+		{
+			name:    "tail",
+			command: "tail",
+			write: func(buf *bytes.Buffer) error {
+				return writeTailJSON(buf, app.TailReport{RepoRoot: "/tmp/repo", RunDir: "/tmp/repo/.room/runs/0007"}, nil)
+			},
+		},
+		{
+			name:    "prune",
+			command: "prune",
+			write: func(buf *bytes.Buffer) error {
+				return writePruneJSON(buf, app.PruneReport{RepoRoot: "/tmp/repo", RunsDir: "/tmp/repo/.room/runs"}, nil)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := tc.write(&buf); err != nil {
+				t.Fatalf("write %s json: %v", tc.name, err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			if payload["schema_version"] != float64(commandJSONSchemaVersion) {
+				t.Fatalf("schema_version = %v", payload["schema_version"])
+			}
+			if payload["command"] != tc.command {
+				t.Fatalf("command = %v", payload["command"])
+			}
+			if payload["type"] != "result" {
+				t.Fatalf("type = %v", payload["type"])
+			}
+			if got, ok := payload["ok"].(bool); !ok || !got {
+				t.Fatalf("expected ok result, got %v", payload["ok"])
+			}
+		})
 	}
 }
 

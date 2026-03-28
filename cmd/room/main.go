@@ -195,7 +195,7 @@ func newInspectCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				InstructionFile: instructionFile,
 			})
 			if asJSON {
-				return printJSON(report, err)
+				return writeInspectJSON(os.Stdout, report, err)
 			}
 			if err != nil {
 				return err
@@ -222,7 +222,7 @@ func newConfigCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				ConfigPath: configPath,
 			})
 			if asJSON {
-				return printJSON(report, err)
+				return writeConfigJSON(os.Stdout, report, err)
 			}
 			if err != nil {
 				return err
@@ -247,7 +247,7 @@ func newConfigCheckCommand(ctx context.Context, svc *app.Service) *cobra.Command
 				ConfigPath: configPath,
 			})
 			if asJSON {
-				return printJSON(report, err)
+				return writeConfigCheckJSON(os.Stdout, report, err)
 			}
 			if err != nil {
 				return err
@@ -274,7 +274,7 @@ func newBundleCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				RunDir:     runDir,
 			})
 			if asJSON {
-				return printJSON(report, err)
+				return writeBundleJSON(os.Stdout, report, err)
 			}
 			if err != nil {
 				return err
@@ -290,6 +290,7 @@ func newBundleCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 
 func newTailCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 	var configPath string
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "tail",
 		Short: "Show the newest ROOM run bundle",
@@ -298,6 +299,9 @@ func newTailCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				WorkingDir: mustWD(),
 				ConfigPath: configPath,
 			})
+			if asJSON {
+				return writeTailJSON(os.Stdout, report, err)
+			}
 			if err != nil {
 				return err
 			}
@@ -305,6 +309,7 @@ func newTailCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "override the config path")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
 	return cmd
 }
 
@@ -324,7 +329,7 @@ func newPruneCommand(ctx context.Context, svc *app.Service) *cobra.Command {
 				DryRun:     dryRun,
 			})
 			if asJSON {
-				return printJSON(report, err)
+				return writePruneJSON(os.Stdout, report, err)
 			}
 			if err != nil {
 				return err
@@ -802,10 +807,11 @@ func renderDoctor(report app.DoctorReport) error {
 	}))
 }
 
-const doctorJSONSchemaVersion = 1
+const commandJSONSchemaVersion = 1
 
 type versionedJSONResultLine[T any] struct {
 	SchemaVersion int    `json:"schema_version"`
+	Command       string `json:"command"`
 	Type          string `json:"type"`
 	OK            bool   `json:"ok"`
 	Result        T      `json:"result,omitempty"`
@@ -813,16 +819,41 @@ type versionedJSONResultLine[T any] struct {
 }
 
 func writeDoctorJSON(w io.Writer, report app.DoctorReport, err error) error {
-	return writeVersionedJSONResult(w, doctorJSONSchemaVersion, report, err)
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "doctor", report, err)
 }
 
 func writeStatusJSON(w io.Writer, report app.StatusReport, err error) error {
-	return writeVersionedJSONResult(w, doctorJSONSchemaVersion, report, err)
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "status", report, err)
 }
 
-func writeVersionedJSONResult[T any](w io.Writer, schemaVersion int, report T, err error) error {
+func writeInspectJSON(w io.Writer, report app.InspectReport, err error) error {
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "inspect", report, err)
+}
+
+func writeConfigJSON(w io.Writer, report app.ConfigReport, err error) error {
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "config", report, err)
+}
+
+func writeConfigCheckJSON(w io.Writer, report app.ConfigCheckReport, err error) error {
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "config-check", report, err)
+}
+
+func writeBundleJSON(w io.Writer, report app.BundleReport, err error) error {
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "bundle", report, err)
+}
+
+func writeTailJSON(w io.Writer, report app.TailReport, err error) error {
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "tail", report, err)
+}
+
+func writePruneJSON(w io.Writer, report app.PruneReport, err error) error {
+	return writeVersionedJSONResult(w, commandJSONSchemaVersion, "prune", report, err)
+}
+
+func writeVersionedJSONResult[T any](w io.Writer, schemaVersion int, command string, report T, err error) error {
 	payload := versionedJSONResultLine[T]{
 		SchemaVersion: schemaVersion,
+		Command:       command,
 		Type:          "result",
 		OK:            err == nil,
 		Result:        report,
@@ -865,22 +896,6 @@ func renderLines(lines []string) error {
 		}
 	}
 	return nil
-}
-
-func printJSON(v any, err error) error {
-	payload := map[string]any{"ok": err == nil}
-	if v != nil {
-		payload["result"] = v
-	}
-	if err != nil {
-		payload["error"] = err.Error()
-	}
-	data, marshalErr := json.MarshalIndent(payload, "", "  ")
-	if marshalErr != nil {
-		return errors.Join(err, marshalErr)
-	}
-	_, writeErr := fmt.Fprintln(os.Stdout, string(data))
-	return errors.Join(err, writeErr)
 }
 
 func mustWD() string {

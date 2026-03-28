@@ -172,11 +172,11 @@ Each iteration:
 
 ### `room inspect`
 
-Prints the exact prompt body ROOM would send next.
+Prints the exact prompt body ROOM would send next. Pass `--json` for the stable command envelope instead of raw prompt text.
 
 ### `room config`
 
-Prints the resolved ROOM configuration, including the effective provider settings and the paths ROOM will use for its state files.
+Prints the resolved ROOM configuration, including the effective provider settings and the paths ROOM will use for its state files. Pass `--json` for the stable command envelope.
 
 ### `room config-check`
 
@@ -184,15 +184,15 @@ Validates `.room/config.toml` with the strict parser before a run starts. Use `-
 
 ### `room tail`
 
-Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured result, and diff stats without making you open the artifact directory by hand.
+Finds the newest `.room/runs/<n>/` bundle and prints the prompt, structured result, and diff stats without making you open the artifact directory by hand. Pass `--json` to inspect the newest tape without scraping text output.
 
 ### `room bundle`
 
-Inspects a run bundle directly, verifies any stored manifest, and prints the artifact inventory plus any integrity hints so archived runs can be audited without spelunking the bundle directory.
+Inspects a run bundle directly, verifies any stored manifest, and prints the artifact inventory plus any integrity hints so archived runs can be audited without spelunking the bundle directory. Pass `--json` for the stable command envelope.
 
 ### `room prune`
 
-Deletes older `.room/runs/<n>/` bundles so the tape archive does not grow without bound. Use `--keep N` to choose how many newest bundles to retain, and `--dry-run` to preview the cut.
+Deletes older `.room/runs/<n>/` bundles so the tape archive does not grow without bound. Use `--keep N` to choose how many newest bundles to retain, `--dry-run` to preview the cut, and `--json` for the stable command envelope.
 
 ### `room status`
 
