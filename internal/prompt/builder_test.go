@@ -194,6 +194,11 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
 			Hash:    "abc123",
 			Subject: "Stop leaking " + openAIKey,
 		}},
+		GitStatus: strings.Join([]string{
+			"?? secrets/" + githubPAT + ".txt",
+			" M .env",
+			"?? creds/" + slackToken + ".log",
+		}, "\n"),
 		RepoPath: "/tmp/repo",
 	})
 
@@ -216,6 +221,14 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
 	} {
 		if strings.Contains(body, want) {
 			t.Fatalf("expected prompt to redact %q:\n%s", want, body)
+		}
+	}
+	for _, want := range []string{
+		"?? secrets/<redacted>.txt",
+		"?? creds/<redacted>.log",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected prompt to keep redacted git status context %q:\n%s", want, body)
 		}
 	}
 }

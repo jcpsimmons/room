@@ -202,5 +202,6 @@ func redactBuildInput(input BuildInput) BuildInput {
 	for i := range input.RecentCommits {
 		input.RecentCommits[i].Subject = redactSensitiveText(input.RecentCommits[i].Subject)
 	}
+	input.GitStatus = redactSensitiveText(input.GitStatus)
 	return input
 }
