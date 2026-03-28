@@ -90,48 +90,23 @@ func (c CLI) IsDirty(ctx context.Context, dir string) (bool, error) {
 }
 
 func (CLI) Diff(ctx context.Context, dir string) (string, error) {
-	paths, err := changedPaths(ctx, dir, true)
+	diff, _, err := diffAndStats(ctx, dir)
 	if err != nil {
 		return "", err
 	}
-	if len(paths) == 0 {
-		return "", nil
-	}
-	return run(ctx, dir, append([]string{"diff", "--binary", "--"}, paths...)...)
+	return diff, nil
 }
 
 func (CLI) DiffAndStats(ctx context.Context, dir string) (string, DiffStats, error) {
-	paths, err := changedPaths(ctx, dir, true)
-	if err != nil {
-		return "", DiffStats{}, err
-	}
-	if len(paths) == 0 {
-		return "", DiffStats{}, nil
-	}
-	diff, err := run(ctx, dir, append([]string{"diff", "--binary", "--"}, paths...)...)
-	if err != nil {
-		return "", DiffStats{}, err
-	}
-	out, err := run(ctx, dir, append([]string{"diff", "--numstat", "--"}, paths...)...)
-	if err != nil {
-		return "", DiffStats{}, err
-	}
-	return diff, parseDiffStats(out), nil
+	return diffAndStats(ctx, dir)
 }
 
 func (CLI) DiffStats(ctx context.Context, dir string) (DiffStats, error) {
-	paths, err := changedPaths(ctx, dir, true)
+	_, stats, err := diffAndStats(ctx, dir)
 	if err != nil {
 		return DiffStats{}, err
 	}
-	if len(paths) == 0 {
-		return DiffStats{}, nil
-	}
-	out, err := run(ctx, dir, append([]string{"diff", "--numstat", "--"}, paths...)...)
-	if err != nil {
-		return DiffStats{}, err
-	}
-	return parseDiffStats(out), nil
+	return stats, nil
 }
 
 func (CLI) ChangedPaths(ctx context.Context, dir string) ([]string, error) {
@@ -298,6 +273,94 @@ func changedPaths(ctx context.Context, dir string, trackedOnly bool) ([]string, 
 	return paths, nil
 }
 
+func diffAndStats(ctx context.Context, dir string) (string, DiffStats, error) {
+	entries, err := statusEntries(ctx, dir)
+	if err != nil {
+		return "", DiffStats{}, err
+	}
+	tracked, untracked := diffTargets(entries)
+	if len(tracked) == 0 && len(untracked) == 0 {
+		return "", DiffStats{}, nil
+	}
+
+	var parts []string
+	stats := DiffStats{}
+
+	if len(tracked) > 0 {
+		diff, err := run(ctx, dir, append([]string{"diff", "--binary", "--"}, tracked...)...)
+		if err != nil {
+			return "", DiffStats{}, err
+		}
+		if diff != "" {
+			parts = append(parts, diff)
+		}
+
+		out, err := run(ctx, dir, append([]string{"diff", "--numstat", "--"}, tracked...)...)
+		if err != nil {
+			return "", DiffStats{}, err
+		}
+		stats = addDiffStats(stats, parseDiffStats(out))
+	}
+
+	for _, path := range untracked {
+		diff, pathStats, err := untrackedDiffAndStats(ctx, dir, path)
+		if err != nil {
+			return "", DiffStats{}, err
+		}
+		if diff != "" {
+			parts = append(parts, diff)
+		}
+		stats = addDiffStats(stats, pathStats)
+	}
+
+	return strings.Join(parts, "\n"), stats, nil
+}
+
+func diffTargets(entries []statusEntry) ([]string, []string) {
+	trackedSeen := map[string]struct{}{}
+	untrackedSeen := map[string]struct{}{}
+	var tracked []string
+	var untracked []string
+	for _, entry := range entries {
+		if entry.primary == "" {
+			continue
+		}
+		if entry.code == "??" {
+			if _, ok := untrackedSeen[entry.primary]; ok {
+				continue
+			}
+			untrackedSeen[entry.primary] = struct{}{}
+			untracked = append(untracked, entry.primary)
+			continue
+		}
+		if _, ok := trackedSeen[entry.primary]; ok {
+			continue
+		}
+		trackedSeen[entry.primary] = struct{}{}
+		tracked = append(tracked, entry.primary)
+	}
+	return tracked, untracked
+}
+
+func untrackedDiffAndStats(ctx context.Context, dir, path string) (string, DiffStats, error) {
+	diffOut, err := runRawAllowExitCodes(ctx, dir, []int{1}, "diff", "--binary", "--no-index", "--", os.DevNull, path)
+	if err != nil {
+		return "", DiffStats{}, err
+	}
+	statsOut, err := runRawAllowExitCodes(ctx, dir, []int{1}, "diff", "--numstat", "--no-index", "--", os.DevNull, path)
+	if err != nil {
+		return "", DiffStats{}, err
+	}
+	return strings.TrimSpace(diffOut), parseDiffStats(statsOut), nil
+}
+
+func addDiffStats(base, extra DiffStats) DiffStats {
+	base.Files += extra.Files
+	base.Added += extra.Added
+	base.Deleted += extra.Deleted
+	return base
+}
+
 func parseStatusEntry(record []byte, rest [][]byte) (statusEntry, int) {
 	line := string(record)
 	if len(line) < 4 {
@@ -419,12 +482,32 @@ func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 func runRawBytes(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	return runRawBytesAllowExitCodes(ctx, dir, nil, args...)
+}
+
+func runRawAllowExitCodes(ctx context.Context, dir string, allowed []int, args ...string) (string, error) {
+	out, err := runRawBytesAllowExitCodes(ctx, dir, allowed, args...)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func runRawBytesAllowExitCodes(ctx context.Context, dir string, allowed []int, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			for _, code := range allowed {
+				if exitErr.ExitCode() == code {
+					return stdout.Bytes(), nil
+				}
+			}
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()

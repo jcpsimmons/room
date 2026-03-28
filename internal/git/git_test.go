@@ -267,6 +267,39 @@ func TestSpacedPathsFlowThroughStatusDiffAndCommit(t *testing.T) {
 	}
 }
 
+func TestUntrackedFilesFlowThroughDiffAndStats(t *testing.T) {
+	t.Parallel()
+
+	repo := setupGitRepo(t)
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "base\n")
+	runGit(t, repo, "add", "tracked.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "base\nchange\n")
+	writeFile(t, filepath.Join(repo, "fresh.txt"), "pulse\nwave\n")
+
+	client := NewClient()
+	ctx := context.Background()
+
+	diff, err := client.Diff(ctx, repo)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	for _, want := range []string{"tracked.txt", "fresh.txt", "new file mode 100644"} {
+		if !strings.Contains(diff, want) {
+			t.Fatalf("expected diff to contain %q, got %q", want, diff)
+		}
+	}
+
+	stats, err := client.DiffStats(ctx, repo)
+	if err != nil {
+		t.Fatalf("diff stats: %v", err)
+	}
+	if stats.Files != 2 || stats.Added != 3 || stats.Deleted != 0 {
+		t.Fatalf("unexpected diff stats %#v", stats)
+	}
+}
+
 func TestRenameEntriesPreserveBothPathsForCommitAll(t *testing.T) {
 	t.Parallel()
 
