@@ -127,6 +127,7 @@ room run --until-done
 room run --no-commit
 room run --allow-dirty
 room run --json
+room completion zsh > "${fpath[1]}/_room"
 ```
 
 Provider selection is config-driven. ROOM defaults to Codex. To use Claude Code instead:
@@ -217,6 +218,10 @@ Use `room doctor --json` when you want the same checks as a machine-readable rep
 ### `room version`
 
 Prints the release version, commit, and build date.
+
+### `room completion`
+
+Generates shell completions for `bash`, `zsh`, `fish`, or `powershell` so ROOM can patch faster from the command line.
 
 ## State And Artifacts
 

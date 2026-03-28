@@ -11,7 +11,9 @@ import (
 
 	"github.com/jcpsimmons/room/internal/app"
 	"github.com/jcpsimmons/room/internal/claude"
+	"github.com/jcpsimmons/room/internal/git"
 	"github.com/jcpsimmons/room/internal/ui"
+	"github.com/jcpsimmons/room/internal/version"
 )
 
 func TestFormatRunProgress(t *testing.T) {
@@ -435,6 +437,58 @@ func TestCommandJSONEncoding(t *testing.T) {
 				t.Fatalf("expected ok result, got %v", payload["ok"])
 			}
 		})
+	}
+}
+
+func TestCompletionCommandGeneratesShellScripts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		shell string
+		snips []string
+	}{
+		{shell: "bash", snips: []string{"complete -o default -F __start_room room", "__room_get_completion_results()"}},
+		{shell: "zsh", snips: []string{"#compdef room", "_room()"}},
+		{shell: "fish", snips: []string{"complete -c room", "__room_perform_completion"}},
+		{shell: "powershell", snips: []string{"Register-ArgumentCompleter -CommandName 'room'", "${__roomCompleterBlock}"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.shell, func(t *testing.T) {
+			root := newRootCommand(t.Context(), app.NewService(app.Dependencies{Git: git.NewClient()}), version.Info{})
+			var stdout bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&bytes.Buffer{})
+			root.SetArgs([]string{"completion", tc.shell})
+
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute completion %s: %v", tc.shell, err)
+			}
+
+			got := stdout.String()
+			for _, snippet := range tc.snips {
+				if !strings.Contains(got, snippet) {
+					t.Fatalf("completion %s missing %q", tc.shell, snippet)
+				}
+			}
+		})
+	}
+}
+
+func TestCompletionCommandRejectsUnknownShell(t *testing.T) {
+	t.Parallel()
+
+	root := newRootCommand(t.Context(), app.NewService(app.Dependencies{Git: git.NewClient()}), version.Info{})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"completion", "tcsh"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected unsupported shell error")
+	}
+	if !strings.Contains(err.Error(), `unsupported shell "tcsh"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
