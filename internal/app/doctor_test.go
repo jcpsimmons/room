@@ -283,6 +283,51 @@ func TestDoctorSurfacesMalformedSummaryHistory(t *testing.T) {
 	}
 }
 
+func TestDoctorSurfacesInstructionStateDrift(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("Retune the event bus\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.LastNextInstruction = "Tighten parser reliability"
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:       &fakeGit{root: repoRoot},
+		Providers: testProviders(&fakeRunner{version: "codex-cli 0.116.0"}, nil),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Doctor(context.Background(), DoctorOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+
+	found := false
+	for _, check := range report.Checks {
+		if check.Name != "instruction_state" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatalf("expected instruction_state to fail, got %#v", check)
+		}
+		if !strings.Contains(check.Message, "state.json no longer matches instruction.txt") {
+			t.Fatalf("unexpected instruction_state check: %#v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("expected instruction_state check, got %#v", report.Checks)
+	}
+}
+
 func TestDoctorSurfacesSchemaContractDrift(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

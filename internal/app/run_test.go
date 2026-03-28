@@ -1281,6 +1281,61 @@ func TestRunSkipsPastArchivedBundlesWhenStateLags(t *testing.T) {
 	}
 }
 
+func TestRunReanchorsInstructionHashWhenInstructionFileWasEditedManually(t *testing.T) {
+	repoRoot := t.TempDir()
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("Retune the drift lattice\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.LastNextInstruction = "Tighten parser reliability"
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	runner := &fakeRunner{
+		version: "codex-cli 0.116.0",
+		runs: []fakeRun{{
+			result: agent.Result{
+				Summary:         "Re-anchored the sequencer",
+				NextInstruction: "Push further into diagnostics",
+				Status:          "continue",
+				CommitMessage:   "re-anchor sequencer",
+			},
+		}},
+	}
+	fakeGit := &fakeGit{
+		root:     repoRoot,
+		dirtySeq: []bool{false},
+	}
+	svc := NewService(Dependencies{
+		Git:       fakeGit,
+		Providers: testProviders(runner, nil),
+		Now:       fixedClock(),
+		Version:   version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Run(context.Background(), RunOptions{WorkingDir: repoRoot, Iterations: 1, NoCommit: true})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !containsLine(report.Lines, "Instruction drift: state.json no longer matches instruction.txt; ROOM will re-anchor to the live instruction on the next run. Last recorded next instruction diverged from the live file.") {
+		t.Fatalf("run lines missing instruction drift note:\n%s", strings.Join(report.Lines, "\n"))
+	}
+	updated, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load updated state: %v", err)
+	}
+	if updated.CurrentInstructionHash != state.InstructionHash("Push further into diagnostics") {
+		t.Fatalf("current instruction hash = %q", updated.CurrentInstructionHash)
+	}
+}
+
 func TestRunUsesClaudeProviderWhenConfigured(t *testing.T) {
 	repoRoot := t.TempDir()
 	cfg, paths := prepareInitializedRepo(t, repoRoot)

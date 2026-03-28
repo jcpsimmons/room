@@ -216,6 +216,14 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 	if err != nil {
 		return RunReport{}, err
 	}
+	instructionSignal, err := loadInstructionSignal(paths.InstructionPath)
+	if err != nil {
+		return RunReport{}, err
+	}
+	drift := inspectInstructionDrift(snapshot, instructionSignal)
+	if drift.Detected {
+		snapshot.CurrentInstructionHash = drift.CurrentHash
+	}
 	snapshot.LastFailure = ""
 	snapshot.LastFailureRunDirectory = ""
 
@@ -255,6 +263,9 @@ func (s *Service) Run(ctx context.Context, opts RunOptions) (report RunReport, e
 		fmt.Sprintf("Provider: %s", agent.DisplayName(provider)),
 		fmt.Sprintf("Iterations requested: %d", opts.Iterations),
 		fmt.Sprintf("Commit mode: %t", commitEnabled),
+	}
+	if drift.Message != "" {
+		lines = append(lines, drift.Message)
 	}
 	if lockNote != "" {
 		lines = append(lines, lockNote)

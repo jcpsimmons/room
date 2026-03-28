@@ -271,6 +271,43 @@ func TestStatusSurfacesPromptHistoryStagnation(t *testing.T) {
 	}
 }
 
+func TestStatusSurfacesInstructionStateDrift(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	if err := os.WriteFile(paths.InstructionPath, []byte("Patch the orbit meter\n"), 0o644); err != nil {
+		t.Fatalf("write instruction: %v", err)
+	}
+	snapshot, err := state.Load(paths.StatePath)
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	snapshot.LastNextInstruction = "Tighten parser reliability"
+	if err := state.Save(paths.StatePath, snapshot); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.InstructionDriftHint == "" {
+		t.Fatal("expected instruction drift hint")
+	}
+	if !strings.Contains(report.InstructionDriftHint, "state.json no longer matches instruction.txt") {
+		t.Fatalf("instruction drift hint = %q", report.InstructionDriftHint)
+	}
+	if !strings.Contains(strings.Join(report.Lines, "\n"), "Last recorded next instruction diverged from the live file.") {
+		t.Fatalf("status lines missing instruction drift detail:\n%s", strings.Join(report.Lines, "\n"))
+	}
+}
+
 func TestStatusSurfacesStaleLockRecoveryState(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

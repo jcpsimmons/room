@@ -154,6 +154,11 @@ func (s *Service) Doctor(ctx context.Context, opts DoctorOptions) (DoctorReport,
 		checks = append(checks, DoctorCheck{Name: "instruction", OK: false, Message: instruction.Hint})
 	} else {
 		checks = append(checks, DoctorCheck{Name: "instruction", OK: true, Message: "instruction.txt is ready"})
+		if snapshot, loadErr := state.Load(paths.StatePath); loadErr == nil {
+			if drift := inspectInstructionDrift(snapshot, instruction); drift.Message != "" {
+				checks = append(checks, DoctorCheck{Name: "instruction_state", OK: false, Message: drift.Message})
+			}
+		}
 	}
 
 	recentSummaries, malformedSummaries, err := logs.ReadRecentSummariesDetailed(paths.SummariesPath, cfg.Prompt.MaxRecentSummaries)

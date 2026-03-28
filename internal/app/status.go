@@ -24,6 +24,7 @@ type StatusReport struct {
 	Provider                   string                `json:"provider"`
 	ProviderAuthStatus         string                `json:"provider_auth_status,omitempty"`
 	ProviderAuthDrift          string                `json:"provider_auth_drift,omitempty"`
+	InstructionDriftHint       string                `json:"instruction_drift_hint,omitempty"`
 	State                      state.Snapshot        `json:"state"`
 	CurrentInstruction         string                `json:"current_instruction"`
 	RecentSummaries            []logs.SummaryEntry   `json:"recent_summaries"`
@@ -93,6 +94,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if instructionHint != "" {
 		currentInstruction = instructionHint
 	}
+	drift := inspectInstructionDrift(snapshot, instructionSignal)
 	providerDiag := s.providerDiagnostics(ctx, cfg)
 	lastRunLine := fmt.Sprintf("Last run: %s", formatTime(snapshot.LastRunAt))
 	if providerDiag.AuthDriftInline != "" {
@@ -144,6 +146,9 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if instructionHint != "" {
 		lines = append(lines, instructionHint)
 	}
+	if drift.Message != "" {
+		lines = append(lines, drift.Message)
+	}
 	promptHistoryHint, _ := promptHistorySignal(currentInstruction, priorInstructions, summaries, commits)
 	if promptHistoryHint != "" {
 		lines = append(lines, promptHistoryHint)
@@ -170,6 +175,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		Provider:                   agent.NormalizeProvider(cfg.Agent.Provider),
 		ProviderAuthStatus:         providerDiag.AuthStatus,
 		ProviderAuthDrift:          providerDiag.AuthDriftInline,
+		InstructionDriftHint:       drift.Message,
 		State:                      snapshot,
 		CurrentInstruction:         currentInstruction,
 		RecentSummaries:            summaries,
