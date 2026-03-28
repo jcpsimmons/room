@@ -106,6 +106,8 @@ type RunModel struct {
 	repoRoot      string
 	commitEnabled bool
 	dryRun        bool
+	audioMuted    bool
+	auxPanel      string
 
 	width  int
 	height int
@@ -188,6 +190,7 @@ func NewRunModel(total int, opts ...RunOption) RunModel {
 		status:    ProgressBoot,
 		headline:  "oscillator warming",
 		detail:    "filaments reaching operating temperature",
+		auxPanel:  "diagnostics",
 	}
 	if rc.audio {
 		m.synth = audio.New()
@@ -231,6 +234,24 @@ func (m RunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			barWidth = 12
 		}
 		m.bar.Width = barWidth
+		return m, nil
+	case tea.KeyMsg:
+		switch value.String() {
+		case "ctrl+c", "q", "esc":
+			return m, tea.Quit
+		case "tab":
+			if m.auxPanel == "flux" {
+				m.auxPanel = "diagnostics"
+			} else {
+				m.auxPanel = "flux"
+			}
+			return m, nil
+		case "m":
+			if m.synth != nil {
+				m.audioMuted = !m.audioMuted
+			}
+			return m, nil
+		}
 		return m, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -325,7 +346,7 @@ func (m RunModel) View() string {
 	right := lipglossJoinVertical(
 		m.renderPhysicsPanel(rightWidth, scopeHeight),
 		m.renderResonancePanel(rightWidth, vizHeight),
-		m.renderDiagnosticsPanel(rightWidth, vizHeight),
+		m.renderAuxPanel(rightWidth, vizHeight),
 		m.renderEventStream(rightWidth, eventsHeight),
 	)
 
@@ -337,7 +358,7 @@ func (m RunModel) View() string {
 
 	footer := renderPanel("MANUAL", strings.Join([]string{
 		statusBadge(string(m.status)),
-		subtitleStyle().Render("ctrl+c closes the gate"),
+		subtitleStyle().Render(m.manualText()),
 	}, "  "), accentRed, innerWidth, footerHeight)
 
 	content := lipglossJoinVertical(
@@ -505,6 +526,14 @@ func (m RunModel) stepFrame(now time.Time) RunModel {
 			ModDepth: modDepth,
 			Detune:   detune,
 		}
+		if m.audioMuted {
+			base.Amp = 0
+			m.synth.UpdateVoice(0, base)
+			m.synth.UpdateVoice(1, audio.Params{})
+			m.synth.UpdateVoice(2, audio.Params{})
+			m.synth.UpdateVoice(3, audio.Params{})
+			return m
+		}
 		m.synth.UpdateVoice(0, m.outcomeCue.audioParams(base))
 
 		// Voice 1: Decay chamber — sub-bass rumble + decay pings.
@@ -615,6 +644,20 @@ func (m RunModel) renderStatusPanel(width, height int) string {
 		strings.Join([]string{
 			kvLine("source", strings.ToUpper(provider), accentOrange),
 			kvLine("voice", model, accentPink),
+		}, "  "),
+	)
+	audioState := "off"
+	if m.synth != nil {
+		audioState = "live"
+		if m.audioMuted {
+			audioState = "muted"
+		}
+	}
+	auxState := strings.ToUpper(m.auxPanel)
+	lines = append(lines,
+		strings.Join([]string{
+			kvLine("audio", audioState, accentLime),
+			kvLine("aux", auxState, accentCyan),
 		}, "  "),
 	)
 
@@ -802,6 +845,25 @@ func (m RunModel) renderDiagnosticsPanel(width, height int) string {
 		lines = []string{subtitleStyle().Render("fault fragments will appear here when a step overloads")}
 	}
 	return renderPanel("DIAGNOSTICS", strings.Join(lines, "\n"), accentOrange, width, height)
+}
+
+func (m RunModel) renderAuxPanel(width, height int) string {
+	if m.auxPanel == "flux" {
+		return m.renderFluxPanel(width, height)
+	}
+	return m.renderDiagnosticsPanel(width, height)
+}
+
+func (m RunModel) manualText() string {
+	parts := []string{"q/esc/ctrl+c close gate", "tab flips aux panel"}
+	if m.synth != nil {
+		audioState := "mute"
+		if m.audioMuted {
+			audioState = "unmute"
+		}
+		parts = append(parts, "m "+audioState+"s audio")
+	}
+	return strings.Join(parts, "  ")
 }
 
 func clampInt(v, lo, hi int) int {

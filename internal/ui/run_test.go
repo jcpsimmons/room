@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -72,5 +73,48 @@ func TestRenderDiagnosticsPanelShowsFaultFragments(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("diagnostics panel missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRunModelTabSwitchesAuxPanel(t *testing.T) {
+	model := NewRunModel(1)
+	model.width = 120
+	model.height = 32
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated := next.(RunModel)
+
+	if updated.auxPanel != "flux" {
+		t.Fatalf("auxPanel = %q, want flux", updated.auxPanel)
+	}
+
+	view := updated.View()
+	if !strings.Contains(view, "FLUX") {
+		t.Fatalf("expected flux panel in view after tab:\n%s", view)
+	}
+	if strings.Contains(view, "DIAGNOSTICS") {
+		t.Fatalf("expected diagnostics panel to be hidden after tab:\n%s", view)
+	}
+}
+
+func TestRunModelMuteToggleUpdatesManualAndStatus(t *testing.T) {
+	model := NewRunModel(1, WithAudio())
+	model.width = 120
+	model.height = 32
+
+	next, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updated := next.(RunModel)
+
+	if !updated.audioMuted {
+		t.Fatal("expected audio to mute")
+	}
+
+	if got := updated.manualText(); got != "q/esc/ctrl+c close gate  tab flips aux panel  m unmutes audio" {
+		t.Fatalf("manualText() = %q", got)
+	}
+
+	status := updated.renderStatusPanel(60, 14)
+	if !strings.Contains(status, "muted") {
+		t.Fatalf("status panel missing muted state:\n%s", status)
 	}
 }

@@ -422,7 +422,6 @@ func runWithUI(ctx context.Context, svc *app.Service, opts app.RunOptions, noSou
 		model,
 		tea.WithAltScreen(),
 		tea.WithContext(ctx),
-		tea.WithInput(nil),
 		tea.WithoutSignalHandler(),
 	)
 
