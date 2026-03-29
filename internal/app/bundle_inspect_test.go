@@ -172,6 +172,37 @@ func TestBundleExplainsMissingArtifacts(t *testing.T) {
 	}
 }
 
+func TestBundleInfersIncompleteStageFromArtifacts(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	writeTailBundle(t, paths.RunsDir, "0001", "sparse prompt", &agent.Result{
+		Summary:         "Signal landed",
+		NextInstruction: "Catch the patch",
+		Status:          "continue",
+		CommitMessage:   "catch the patch",
+	}, "")
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Bundle(context.Background(), BundleOptions{
+		WorkingDir: repoRoot,
+	})
+	if err != nil {
+		t.Fatalf("bundle: %v", err)
+	}
+
+	if report.BundleStageHint != "Stage trace: agent result landed, but patch capture never completed." {
+		t.Fatalf("bundle stage hint = %q", report.BundleStageHint)
+	}
+	if !strings.Contains(report.BundleHint, report.BundleStageHint) {
+		t.Fatalf("bundle hint missing stage trace: %s", report.BundleHint)
+	}
+}
+
 func TestBundleSurfacesUnreadableExecutionArtifact(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

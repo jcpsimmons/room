@@ -27,6 +27,7 @@ type TailReport struct {
 	RunDir               string                `json:"run_dir"`
 	BundleMode           string                `json:"bundle_mode,omitempty"`
 	BundleIntegrity      string                `json:"bundle_integrity,omitempty"`
+	BundleStageHint      string                `json:"bundle_stage_hint,omitempty"`
 	BundleRecovery       string                `json:"bundle_recovery,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint `json:"bundle_integrity_hints,omitempty"`
 	Recipe               *RecipeReport         `json:"recipe,omitempty"`
@@ -104,6 +105,9 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 	if assessment.Hint != "" {
 		lines = append(lines, assessment.Hint)
 	}
+	if assessment.StageHint != "" && !strings.Contains(assessment.Hint, assessment.StageHint) {
+		lines = append(lines, assessment.StageHint)
+	}
 	if len(assessment.Hints) > 0 {
 		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(assessment.Hints)))
 	}
@@ -150,6 +154,7 @@ func (s *Service) Tail(ctx context.Context, opts TailOptions) (TailReport, error
 		RunDir:               runDir,
 		BundleMode:           string(assessment.Mode),
 		BundleIntegrity:      assessment.Integrity,
+		BundleStageHint:      assessment.StageHint,
 		BundleRecovery:       assessment.Recovery,
 		BundleIntegrityHints: assessment.Hints,
 		Recipe:               recipeReportIfPresent(recipe, hasRecipe),

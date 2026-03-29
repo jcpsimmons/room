@@ -76,6 +76,7 @@ type bundleAssessment struct {
 	Mode       bundleMode
 	Integrity  string
 	Hint       string
+	StageHint  string
 	Recovery   string
 	ManifestOK bool
 	Hints      []BundleIntegrityHint
@@ -276,6 +277,7 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 				))
 			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
+			appendBundleStageHint(&assessment, runDir, missing)
 			return assessment, nil
 		}
 		return assessment, nil
@@ -295,6 +297,7 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 				))
 			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is missing dry-run prompt artifact(s): %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
+			appendBundleStageHint(&assessment, runDir, missing)
 			return assessment, nil
 		}
 	case bundleModeExecuted, bundleModeLegacy:
@@ -309,6 +312,7 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 				))
 			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
+			appendBundleStageHint(&assessment, runDir, missing)
 			return assessment, nil
 		}
 	case bundleModeFailed, bundleModeInterrupted:
@@ -323,6 +327,7 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 				))
 			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is missing failure-trace artifact(s): %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
+			appendBundleStageHint(&assessment, runDir, missing)
 			return assessment, nil
 		}
 	default:
@@ -337,6 +342,7 @@ func assessBundleNamed(runDir, subject string) (bundleAssessment, error) {
 				))
 			}
 			assessment.Hint = fmt.Sprintf("Hint: %s %s is incomplete; missing %s.", subject, filepath.Base(runDir), strings.Join(missing, " and "))
+			appendBundleStageHint(&assessment, runDir, missing)
 			return assessment, nil
 		}
 	}
@@ -442,6 +448,52 @@ func appendArtifactDecodeWarning(assessment *bundleAssessment, subject, artifact
 		return
 	}
 	assessment.Hint += " " + message
+}
+
+func appendBundleStageHint(assessment *bundleAssessment, runDir string, missing []string) {
+	if assessment == nil {
+		return
+	}
+	stageHint := inferBundleStageHint(runDir, missing)
+	if strings.TrimSpace(stageHint) == "" {
+		return
+	}
+	assessment.StageHint = stageHint
+	if strings.TrimSpace(assessment.Hint) == "" {
+		assessment.Hint = stageHint
+		return
+	}
+	assessment.Hint += " " + stageHint
+}
+
+func inferBundleStageHint(runDir string, missing []string) string {
+	missingSet := make(map[string]struct{}, len(missing))
+	for _, name := range missing {
+		missingSet[name] = struct{}{}
+	}
+
+	present := func(name string) bool {
+		_, missing := missingSet[name]
+		return !missing && fsutil.FileExists(filepath.Join(runDir, name))
+	}
+
+	switch {
+	case present("result.json") && !present("diff.patch"):
+		return "Stage trace: agent result landed, but patch capture never completed."
+	case present("execution.json") && !present("result.json"):
+		if report, ok, _, _ := readProgressArtifactLenient(filepath.Join(runDir, "progress.jsonl")); ok && report != nil && strings.TrimSpace(report.LastPhase) != "" {
+			return fmt.Sprintf("Stage trace: execution artifacts landed, but structured result never arrived; last progress phase was %s.", report.LastPhase)
+		}
+		return "Stage trace: execution artifacts landed, but structured result never arrived."
+	case present("prompt.txt") && !present("execution.json"):
+		return "Stage trace: prompt wiring reached disk, but no execution artifacts landed."
+	default:
+		if report, ok, _, _ := readProgressArtifactLenient(filepath.Join(runDir, "progress.jsonl")); ok && report != nil && strings.TrimSpace(report.LastPhase) != "" {
+			return fmt.Sprintf("Stage trace: last recorded progress phase was %s before the bundle went incomplete.", report.LastPhase)
+		}
+	}
+
+	return ""
 }
 
 func missingBundleArtifacts(runDir string, mode bundleMode) []string {

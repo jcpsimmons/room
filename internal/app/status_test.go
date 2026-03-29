@@ -57,6 +57,35 @@ diff --git a/a.txt b/a.txt
 	}
 }
 
+func TestStatusSurfacesBundleStageHintForMissingDiff(t *testing.T) {
+	repoRoot := initGitRepo(t)
+	_, paths := prepareInitializedRepo(t, repoRoot)
+
+	writeTailBundle(t, paths.RunsDir, "0001", "newest prompt", &agent.Result{
+		Summary:         "Captured the drone",
+		NextInstruction: "Print the patch",
+		Status:          "continue",
+		CommitMessage:   "capture the drone",
+	}, "")
+
+	svc := NewService(Dependencies{
+		Git:     gitClientForTailTest{},
+		Version: version.Info{Version: "dev"},
+	})
+
+	report, err := svc.Status(context.Background(), StatusOptions{WorkingDir: repoRoot})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if report.LatestBundleStageHint != "Stage trace: agent result landed, but patch capture never completed." {
+		t.Fatalf("latest bundle stage hint = %q", report.LatestBundleStageHint)
+	}
+	if !strings.Contains(report.LatestBundleHint, report.LatestBundleStageHint) {
+		t.Fatalf("latest bundle hint missing stage trace: %s", report.LatestBundleHint)
+	}
+}
+
 func TestStatusSkipsHintForCompleteNewestBundle(t *testing.T) {
 	repoRoot := initGitRepo(t)
 	_, paths := prepareInitializedRepo(t, repoRoot)

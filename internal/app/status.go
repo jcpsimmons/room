@@ -33,6 +33,7 @@ type StatusReport struct {
 	LatestBundleMode           string                `json:"latest_bundle_mode,omitempty"`
 	LatestBundleIntegrity      string                `json:"latest_bundle_integrity,omitempty"`
 	LatestBundleHint           string                `json:"latest_bundle_hint,omitempty"`
+	LatestBundleStageHint      string                `json:"latest_bundle_stage_hint,omitempty"`
 	LatestBundleRecovery       string                `json:"latest_bundle_recovery,omitempty"`
 	LatestBundleIntegrityHints []BundleIntegrityHint `json:"latest_bundle_integrity_hints,omitempty"`
 	LatestLockHint             string                `json:"latest_lock_hint,omitempty"`
@@ -120,6 +121,9 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 	if assessment.Hint != "" {
 		lines = append(lines, assessment.Hint)
 	}
+	if assessment.StageHint != "" && !strings.Contains(assessment.Hint, assessment.StageHint) {
+		lines = append(lines, assessment.StageHint)
+	}
 	if len(assessment.Hints) > 0 {
 		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(assessment.Hints)))
 	}
@@ -184,6 +188,7 @@ func (s *Service) Status(ctx context.Context, opts StatusOptions) (StatusReport,
 		LatestBundleMode:           string(assessment.Mode),
 		LatestBundleIntegrity:      assessment.Integrity,
 		LatestBundleHint:           assessment.Hint,
+		LatestBundleStageHint:      assessment.StageHint,
 		LatestBundleRecovery:       assessment.Recovery,
 		LatestBundleIntegrityHints: assessment.Hints,
 		LatestLockHint:             lockHint,

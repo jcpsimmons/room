@@ -27,6 +27,7 @@ type BundleReport struct {
 	BundleMode           string                 `json:"bundle_mode,omitempty"`
 	BundleIntegrity      string                 `json:"bundle_integrity,omitempty"`
 	BundleHint           string                 `json:"bundle_hint,omitempty"`
+	BundleStageHint      string                 `json:"bundle_stage_hint,omitempty"`
 	BundleIntegrityHints []BundleIntegrityHint  `json:"bundle_integrity_hints,omitempty"`
 	Recipe               *RecipeReport          `json:"recipe,omitempty"`
 	Execution            *ExecutionReport       `json:"execution,omitempty"`
@@ -106,6 +107,7 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 		BundleMode:           string(assessment.Mode),
 		BundleIntegrity:      assessment.Integrity,
 		BundleHint:           assessment.Hint,
+		BundleStageHint:      assessment.StageHint,
 		BundleIntegrityHints: assessment.Hints,
 		Recipe:               recipeReportIfPresent(recipe, hasRecipe),
 		Execution:            executionReportIfPresent(execution, hasExecution),
@@ -137,6 +139,9 @@ func (s *Service) Bundle(ctx context.Context, opts BundleOptions) (BundleReport,
 	}
 	if report.BundleHint != "" {
 		lines = append(lines, report.BundleHint)
+	}
+	if report.BundleStageHint != "" && !strings.Contains(report.BundleHint, report.BundleStageHint) {
+		lines = append(lines, report.BundleStageHint)
 	}
 	if len(report.BundleIntegrityHints) > 0 {
 		lines = append(lines, fmt.Sprintf("Bundle integrity hints: %s", manifestHintsJSON(report.BundleIntegrityHints)))
