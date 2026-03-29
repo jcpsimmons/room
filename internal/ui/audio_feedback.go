@@ -56,11 +56,11 @@ func (c audioCue) audioParams(fallback audio.Params) audio.Params {
 	outParam := clamp01(fallback.Amp + boost*(1-fallback.Amp))
 
 	return audio.Params{
-		Freq: fallbackBlend(fallback.Freq, out.Freq, outBlend, outcomeFreqBlendCap),
-		Amp:  outParam,
-		ModFreq: fallbackBlend(fallback.ModFreq, out.ModFreq, outBlend, outcomeModFreqBlendCap),
+		Freq:     fallbackBlend(fallback.Freq, out.Freq, outBlend, outcomeFreqBlendCap),
+		Amp:      outParam,
+		ModFreq:  fallbackBlend(fallback.ModFreq, out.ModFreq, outBlend, outcomeModFreqBlendCap),
 		ModDepth: clampPositive(fallbackBlend(fallback.ModDepth, out.ModDepth, outBlend, outcomeModDepthBlendCap)),
-		Detune: fallbackBlend(fallback.Detune, out.Detune, outBlend, outcomeDetuneBlendCap),
+		Detune:   fallbackBlend(fallback.Detune, out.Detune, outBlend, outcomeDetuneBlendCap),
 	}
 }
 
@@ -88,6 +88,14 @@ func clampPositive(v float64) float64 {
 
 func outcomeToneRecipe(ev ProgressEvent) (audio.Params, bool) {
 	switch {
+	case progressPhase(ev) == "iteration_success":
+		return audio.Params{
+			Freq:     659.25,
+			Amp:      0.26,
+			ModFreq:  987.77,
+			ModDepth: 0.42,
+			Detune:   7.0,
+		}, true
 	case ev.Kind == ProgressFailure:
 		return audio.Params{
 			Freq:     82.41,
@@ -123,4 +131,12 @@ func outcomeToneRecipe(ev ProgressEvent) (audio.Params, bool) {
 	default:
 		return audio.Params{}, false
 	}
+}
+
+func progressPhase(ev ProgressEvent) string {
+	if ev.Meta == nil {
+		return ""
+	}
+	phase, _ := ev.Meta["phase"].(string)
+	return phase
 }
